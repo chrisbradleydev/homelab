@@ -1,0 +1,36 @@
+- name: Create description for VMs
+  set_fact:
+    dynamic_fact_for_{{ item.template_name | hash('sha1')}}: "This template is using the {{ proxmox_import_storage }} storage and is configured with {{ proxmox_template.memory }} MB of RAM and {{ proxmox_template.cores }} CPU cores."
+  with_items: "{{ proxmox_cloudimgs }}"
+  loop_control:
+    extended: true
+- name: Create VMs
+  ansible.builtin.shell:
+    cmd: qm create {{ (next_vm_id | int) + ansible_loop.index | int }} --name {{ item.template_name }} --cores {{ proxmox_template.cores }} --memory {{ proxmox_template.memory }} --net0 {{ proxmox_template.net0 }} --description "{{ hostvars[inventory_hostname]['dynamic_fact_for_' + item.template_name |  hash('sha1')] }} {{ item.additionalDescription | default('') }}"
+  register: command_result
+  failed_when:
+    - '"already exists" not in command_result.stderr'
+    - command_result.rc != 0
+  with_items: "{{ proxmox_cloudimgs }}"
+  loop_control:
+    extended: true
+- name: Copy SSH key to Proxmox
+  ansible.builtin.copy:
+    content: "{{ proxmox_sshkey }}"
+    dest: "{{ proxmox_isopath }}/id_ed25519.pub"
+    owner: root
+    group: root
+    mode: '0644'
+- name: Set Cloud Init settings
+  ansible.builtin.script: "config.sh {{ (next_vm_id | int)  + ansible_loop.index  | int }} {{ proxmox_ipconfig0 }} {{ proxmox_isopath }}/id_ed25519.pub {{ proxmox_ciuser }} {{ proxmox_import_storage }} {{ proxmox_isopath }}/{{ item.template_name }}.qcow2"
+  with_items: "{{ proxmox_cloudimgs }}"
+  register: config
+  changed_when: "'Skipping' not in config.stdout"
+  loop_control:
+    extended: true
+- name: Convert to template
+  ansible.builtin.shell:
+    cmd: qm template {{ (next_vm_id | int)  + ansible_loop.index  | int }}
+  with_items: "{{ proxmox_cloudimgs }}"
+  loop_control:
+    extended: true

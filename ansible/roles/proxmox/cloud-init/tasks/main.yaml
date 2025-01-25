@@ -1,0 +1,7 @@
+---
+- name: Include download images tasks
+  ansible.builtin.include_tasks: download-images.yaml
+- name: Include customize images tasks
+  ansible.builtin.include_tasks: customize-images.yaml
+- name: Include create templates tasks
+  ansible.builtin.include_tasks: create-templates.yaml

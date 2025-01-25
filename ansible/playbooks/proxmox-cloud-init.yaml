@@ -1,0 +1,6 @@
+- name: proxmox-cloud-init.yaml
+  hosts: pve1.localdomain
+  gather_facts: true
+  tasks:
+    - import_role:
+        name: proxmox/cloud-init

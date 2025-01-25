@@ -1,0 +1,18 @@
+---
+proxmox_template:
+  cores: 1
+  disk: 32G
+  memory: 2048
+  net0: virtio,bridge=vmbr0,firewall=1
+  start_id: 9000
+proxmox_isopath: /var/isos # path to download images
+proxmox_import_storage: local # proxmox storage
+proxmox_cloudimgs:
+  - url: https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img
+    template_name: ubuntu-22.04-server
+  - url: https://cloud-images.ubuntu.com/releases/24.04/release/ubuntu-24.04-server-cloudimg-amd64.img
+    template_name: ubuntu-24.04-server
+proxmox_ciuser: # cloud-init user
+proxmox_ipconfig0: ip=dhcp # ip6=auto,ip=dhcp
+proxmox_sshkey: "" # public sshkey
+proxmox_install_agent: true

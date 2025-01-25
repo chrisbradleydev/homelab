@@ -1,0 +1,23 @@
+- name: Install libguestfs-tools
+  apt:
+    name: libguestfs-tools
+    state: present
+    update_cache: yes
+    cache_valid_time: 3600
+  when: proxmox_install_agent | bool
+- name: Install qemu-guest-agent
+  ansible.builtin.shell: |
+    virt-customize -a {{ proxmox_isopath }}/{{ item.template_name }}.qcow2 --install qemu-guest-agent
+  with_items: "{{ proxmox_cloudimgs }}"
+  when: proxmox_install_agent | bool
+  loop_control:
+    extended: true
+- name: Fix Machine ID
+  ansible.builtin.shell: |
+    virt-customize -a {{ proxmox_isopath }}/{{ item.template_name }}.qcow2 --run {{ proxmox_isopath }}/clear-machine-id.sh
+  with_items: "{{ proxmox_cloudimgs }}"
+  loop_control:
+    extended: true
+- name: Resize cloud-init images
+  ansible.builtin.command: "qemu-img resize {{ proxmox_isopath }}/{{ item.template_name }}.qcow2 {{ proxmox_template.disk }}"
+  with_items: "{{ proxmox_cloudimgs }}"
