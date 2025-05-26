@@ -1,0 +1,6 @@
+- name: kubernetes-nodes.yaml
+  hosts: kube1.localdomain
+  gather_facts: true
+  tasks:
+    - import_role:
+        name: kubernetes/nodes

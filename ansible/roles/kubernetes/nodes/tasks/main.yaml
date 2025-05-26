@@ -1,0 +1,5 @@
+---
+- name: Install containerd
+  ansible.builtin.include_tasks: install-containerd.yaml
+- name: Configure Nodes
+  ansible.builtin.include_tasks: configure-nodes.yaml

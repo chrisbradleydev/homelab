@@ -1,0 +1,50 @@
+# https://kubernetes.io/docs/setup/production-environment/container-runtimes/#prerequisite-ipv4-forwarding-optional
+- name: Set ipv4 forward
+  become: true
+  ansible.builtin.copy:
+    owner: root
+    group: root
+    mode: "0644"
+    dest: /etc/sysctl.d/local.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+
+- name: Apply sysctl params without reboot
+  become: true
+  ansible.builtin.command: sysctl --system
+
+- name: Get modules
+  ansible.builtin.shell:
+    cmd: |
+      lsmod | grep br_netfilter
+      lsmod | grep overlay
+  register: modulesAdded
+
+- name: Verify modules are loaded
+  ansible.builtin.assert:
+    that:
+      - "'br_netfilter' in modulesAdded.stdout"
+      - "'overlay' in modulesAdded.stdout"
+
+- name: Add Kubernetes's apt keyring
+  become: true
+  ansible.builtin.apt_key:
+    url: "https://pkgs.k8s.io/core:/stable:/{{ kubernetes_kube_version }}/deb/Release.key"
+    keyring: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    state: present
+
+- name: Add Kubernetes apt repo
+  become: true
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/{{ kubernetes_kube_version }}/deb/ /"
+    state: present
+    filename: kubernetes
+
+- name: Mark apt packages as held back
+  become: true
+  ansible.builtin.command: apt-mark hold kubeadm kubectl kubelet
+
+- name: Disable all swaps from /proc/swaps
+  ansible.builtin.command: swapoff -a
