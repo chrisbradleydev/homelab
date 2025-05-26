@@ -1,0 +1,4 @@
+---
+kubernetes_ciuser: # cloud-init user
+kubernetes_sshkey: ""
+kubernetes_kube_version: "v1.32"
