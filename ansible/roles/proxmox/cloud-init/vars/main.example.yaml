@@ -8,10 +8,18 @@ proxmox_template:
 proxmox_isopath: /var/isos # path to download images
 proxmox_import_storage: local # proxmox storage
 proxmox_cloudimgs:
+  - url: https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2
+    template_name: debian-11-generic
+    tag: debian
+  - url: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+    template_name: debian-12-generic
+    tag: debian
   - url: https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img
     template_name: ubuntu-22.04-server
+    tag: ubuntu
   - url: https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img
     template_name: ubuntu-24.04-server
+    tag: ubuntu
 proxmox_ciuser: # cloud-init user
 proxmox_ipconfig0: ip=dhcp # ip6=auto,ip=dhcp
 proxmox_sshkey: "" # public sshkey

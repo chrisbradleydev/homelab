@@ -20,9 +20,9 @@
     dest: "{{ proxmox_isopath }}/id_ed25519.pub"
     owner: root
     group: root
-    mode: '0644'
+    mode: "0644"
 - name: Set Cloud Init settings
-  ansible.builtin.script: "config.sh {{ (next_vm_id | int)  + ansible_loop.index  | int }} {{ proxmox_ipconfig0 }} {{ proxmox_isopath }}/id_ed25519.pub {{ proxmox_ciuser }} {{ proxmox_import_storage }} {{ proxmox_isopath }}/{{ item.template_name }}.qcow2"
+  ansible.builtin.script: "config.sh {{ (next_vm_id | int)  + ansible_loop.index  | int }} {{ proxmox_ipconfig0 }} {{ proxmox_isopath }}/id_ed25519.pub {{ proxmox_ciuser }} {{ proxmox_import_storage }} {{ proxmox_isopath }}/{{ item.template_name }}.qcow2 {{ item.tag }}"
   with_items: "{{ proxmox_cloudimgs }}"
   register: config
   changed_when: "'Skipping' not in config.stdout"

@@ -7,5 +7,6 @@ galaxy_info:
     - proxmox
     - cloudinit
     - templates
+    - debian
     - ubuntu
     - vm

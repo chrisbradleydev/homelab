@@ -13,7 +13,7 @@ vim roles/proxmox/cloud-init/vars/main.yaml
 vim playbooks/proxmox-cloud-init.yaml
 ```
 
-## Create Proxmox Ubuntu 22.04 & 24.04 cloud-init templates
+## Create Proxmox Cloud Init templates
 
 ```sh
 ansible-playbook playbooks/proxmox-cloud-init.yaml
