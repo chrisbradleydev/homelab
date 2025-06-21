@@ -32,4 +32,4 @@ ansible-galaxy collection install -r requirements.yaml
 
 - [Default Debian Installs](./ansible/roles/debian/defaults/README.md)
 - [Initialize Kubernetes Nodes](./ansible/roles/kubernetes/nodes/README.md)
-- [Proxmox Cloud Init templates](./ansible/roles/proxmox/cloud-init/README.md)
+- [Proxmox Cloud Init Templates](./ansible/roles/proxmox/cloud-init/README.md)
