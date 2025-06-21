@@ -13,7 +13,7 @@ vim roles/kubernetes/nodes/vars/main.yaml
 vim playbooks/kubernetes-nodes.yaml
 ```
 
-## Initialize Kubernetes nodes
+## Initialize Kubernetes Nodes
 
 ```sh
 ansible-playbook playbooks/kubernetes-nodes.yaml

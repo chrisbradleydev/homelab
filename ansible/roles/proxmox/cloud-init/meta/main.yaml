@@ -1,6 +1,6 @@
 galaxy_info:
   author: Chris Bradley
-  description: Proxmox Cloud Init templates
+  description: Proxmox Cloud Init Templates
   license: GNU GPLv3
   min_ansible_version: "2.18"
   galaxy_tags:
