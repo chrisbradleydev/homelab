@@ -1,0 +1,14 @@
+- name: Install packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - fzf
+      - git
+      - vim
+      - zsh
+
+- name: Set default shell for user
+  become: true
+  ansible.builtin.user:
+    name: chrisbradley
+    shell: /usr/bin/zsh
