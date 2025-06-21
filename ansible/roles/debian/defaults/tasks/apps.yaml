@@ -1,0 +1,33 @@
+- name: Make /opt directories
+  become: true
+  ansible.builtin.file:
+    path: "/opt/{{ item.name }}"
+    state: directory
+    mode: "0755"
+  with_items: "{{ debian_apps }}"
+
+- name: Download archives
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "/tmp/{{ item.name }}.tar.gz"
+  with_items: "{{ debian_apps }}"
+
+- name: Extract archives to /opt
+  become: true
+  ansible.builtin.unarchive:
+    src: "/tmp/{{ item.name }}.tar.gz"
+    dest: "/opt/{{ item.name }}"
+    remote_src: yes
+  with_items: "{{ debian_apps }}"
+
+- name: Symlink binaries to /usr/local/bin
+  become: true
+  ansible.builtin.file:
+    force: true
+    owner: root
+    group: root
+    mode: "0755"
+    src: "/opt/{{ item.name }}/{{ item.name }}"
+    dest: "/usr/local/bin/{{ item.name }}"
+    state: link
+  with_items: "{{ debian_apps }}"

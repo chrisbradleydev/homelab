@@ -1,0 +1,9 @@
+galaxy_info:
+  author: Chris Bradley
+  description: Default Debian Installs
+  license: GNU GPLv3
+  min_ansible_version: "2.18"
+  galaxy_tags:
+    - debian
+    - ubuntu
+    - apt

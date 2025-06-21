@@ -1,0 +1,7 @@
+---
+- name: Packages
+  ansible.builtin.include_tasks: packages.yaml
+- name: Dotfiles
+  ansible.builtin.include_tasks: dotfiles.yaml
+- name: Apps
+  ansible.builtin.include_tasks: apps.yaml

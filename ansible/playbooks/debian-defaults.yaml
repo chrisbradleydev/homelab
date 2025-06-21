@@ -1,0 +1,8 @@
+- name: debian-defaults.yaml
+  hosts:
+    - pve1.localdomain
+    - pve2.localdomain
+  gather_facts: true
+  tasks:
+    - import_role:
+        name: debian/defaults
