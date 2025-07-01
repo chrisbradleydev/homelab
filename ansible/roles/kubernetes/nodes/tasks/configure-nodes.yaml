@@ -1,3 +1,27 @@
+- name: Install dependencies
+  become: true
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gpg
+      - iptables
+
+- name: Set kernal modules
+  become: true
+  ansible.builtin.blockinfile:
+    path: /etc/modules-load.d/modules.conf
+    block: |
+      br_netfilter
+      overlay
+
+- name: Add modules
+  become: true
+  ansible.builtin.shell:
+    cmd: |
+      modprobe br_netfilter
+      modprobe overlay
+
 # https://kubernetes.io/docs/setup/production-environment/container-runtimes/#prerequisite-ipv4-forwarding-optional
 - name: Set ipv4 forward
   become: true
@@ -20,14 +44,15 @@
     cmd: |
       lsmod | grep br_netfilter
       lsmod | grep overlay
-  register: modulesAdded
+  register: modules_added
 
 - name: Verify modules are loaded
   ansible.builtin.assert:
     that:
-      - "'br_netfilter' in modulesAdded.stdout"
-      - "'overlay' in modulesAdded.stdout"
+      - "'br_netfilter' in modules_added.stdout"
+      - "'overlay' in modules_added.stdout"
 
+# https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/#install-using-native-package-management
 - name: Add Kubernetes's apt keyring
   become: true
   ansible.builtin.apt_key:
@@ -42,9 +67,64 @@
     state: present
     filename: kubernetes
 
+# https://cri-o.io/
+- name: Add cri-o's apt keyring
+  become: true
+  ansible.builtin.apt_key:
+    url: "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/{{ kubernetes_kube_version }}/deb/Release.key"
+    keyring: /etc/apt/keyrings/cri-o-apt-keyring.gpg
+    state: present
+
+- name: Add cri-o apt repo
+  become: true
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/cri-o-apt-keyring.gpg] https://download.opensuse.org/repositories/isv:/cri-o:/stable:/{{ kubernetes_kube_version }}/deb/ /"
+    state: present
+    filename: cri-o
+
+- name: Install Kubernetes packages
+  become: true
+  ansible.builtin.apt:
+    name: "{{ packages }}"
+    state: present
+    update_cache: yes
+  vars:
+    packages:
+      - "cri-o={{ kubernetes_cri_o_version }}"
+      - "kubeadm={{ kubernetes_kubeadm_version }}"
+      - "kubectl={{ kubernetes_kubectl_version }}"
+      - "kubelet={{ kubernetes_kubelet_version }}"
+
 - name: Mark apt packages as held back
   become: true
-  ansible.builtin.command: apt-mark hold kubeadm kubectl kubelet
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - cri-o
+    - kubeadm
+    - kubectl
+    - kubelet
 
-- name: Disable all swaps from /proc/swaps
+- name: Disable all swaps
+  become: true
   ansible.builtin.command: swapoff -a
+
+- name: Restart kubelet
+  become: true
+  ansible.builtin.service:
+    name: kubelet
+    daemon_reload: yes
+    state: restarted
+
+- name: Start and enable cri-o
+  become: true
+  ansible.builtin.service:
+    name: crio
+    enabled: true
+    state: "started"
+
+- name: Reboot
+  become: true
+  ansible.builtin.reboot:
+    reboot_timeout: 180 # 3 minutes
