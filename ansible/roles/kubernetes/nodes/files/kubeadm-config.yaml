@@ -1,0 +1,29 @@
+# https://v1-32.docs.kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+nodeRegistration:
+  criSocket: "unix:///run/crio/crio.sock"
+  imagePullPolicy: "IfNotPresent"
+  imagePullSerial: true
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+networking:
+  serviceSubnet: "172.16.16.0/20"
+  podSubnet: "172.16.0.0/20"
+  dnsDomain: "cluster.local"
+kubernetesVersion: "v1.33.2"
+controlPlaneEndpoint: "192.168.30.11:6443"
+apiServer:
+  extraArgs:
+    - name: authorization-mode
+      value: Node,RBAC
+---
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+eventBurst: 300
+eventRecordQPS: 100
+kubeAPIBurst: 300
+kubeAPIQPS: 100
+maxPods: 500
