@@ -3,6 +3,7 @@
   ansible.builtin.apt:
     name:
       - ca-certificates
+      - ceph-common
       - curl
       - gpg
       - iptables
@@ -14,6 +15,7 @@
     block: |
       br_netfilter
       overlay
+      rbd
 
 - name: Add modules
   become: true
@@ -21,6 +23,7 @@
     cmd: |
       modprobe br_netfilter
       modprobe overlay
+      modprobe rbd
 
 # https://kubernetes.io/docs/setup/production-environment/container-runtimes/#prerequisite-ipv4-forwarding-optional
 - name: Set ipv4 forward
@@ -44,6 +47,7 @@
     cmd: |
       lsmod | grep br_netfilter
       lsmod | grep overlay
+      lsmod | grep rbd
   register: modules_added
 
 - name: Verify modules are loaded
@@ -51,6 +55,7 @@
     that:
       - "'br_netfilter' in modules_added.stdout"
       - "'overlay' in modules_added.stdout"
+      - "'rbd' in modules_added.stdout"
 
 # https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/#install-using-native-package-management
 - name: Add Kubernetes's apt keyring
