@@ -1,0 +1,30 @@
+csiConfig:
+  - clusterID: "${cluster-id}"
+    monitors:
+      - "192.168.20.11:6789"
+      - "192.168.20.12:6789"
+provisioner:
+  name: provisioner
+  replicaCount: 1
+secret:
+  name: csi-cephfs-secret
+  userID: "${user-id}"
+  userKey: "${user-key}"
+  create: true
+storageClass:
+  name: ceph-rbd-sc
+  pool: kubernetes-pool
+  clusterID: "${cluster-id}"
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+  allowVolumeExpansion: true
+  mountOptions:
+    - discard
+  controllerExpandSecret: csi-cephfs-secret
+  controllerExpandSecretNamespace: ceph-csi-rbd
+  nodeStageSecret: csi-cephfs-secret
+  nodeStageSecretNamespace: ceph-csi-rbd
+  provisionerSecret: csi-cephfs-secret
+  provisionerSecretNamespace: ceph-csi-rbd
+  reclaimPolicy: Delete
+  create: true
