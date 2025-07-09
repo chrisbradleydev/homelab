@@ -1,0 +1,62 @@
+- name: Get CPU architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: arch
+
+- name: Install packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gpg
+
+# https://docs.docker.com/engine/install/debian/
+- name: Download Docker GPG key
+  become: true
+  get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /usr/share/keyrings/docker.asc
+    mode: "0644"
+
+- name: Add Docker apt repo
+  become: true
+  ansible.builtin.apt_repository:
+    repo: "deb [arch={{ arch.stdout }} signed-by=/usr/share/keyrings/docker.asc] https://download.docker.com/linux/debian {{ debian_release }} stable"
+    state: present
+    filename: docker
+
+- name: Install Docker packages
+  become: true
+  ansible.builtin.apt:
+    name: "{{ packages }}"
+    state: present
+    update_cache: yes
+  vars:
+    packages:
+      - "docker-ce"
+      - "docker-ce-cli"
+      - "containerd.io"
+      - "docker-buildx-plugin"
+      - "docker-compose-plugin"
+
+- name: Disable all swaps
+  become: true
+  ansible.builtin.command: swapoff -a
+
+- name: Ensure group docker exists
+  become: true
+  ansible.builtin.group:
+    name: docker
+    state: present
+
+- name: Ensure ciuser is in the docker group
+  become: true
+  user:
+    name: "{{ debian_ciuser }}"
+    groups: docker
+    append: yes
+
+- name: Reboot
+  become: true
+  ansible.builtin.reboot:
+    reboot_timeout: 180 # 3 minutes

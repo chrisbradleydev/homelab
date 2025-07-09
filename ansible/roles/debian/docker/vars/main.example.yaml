@@ -1,0 +1,3 @@
+---
+debian_ciuser: # cloud-init user
+debian_release: bookworm
