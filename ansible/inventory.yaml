@@ -1,5 +1,12 @@
 home:
   hosts:
+    # vlan 10
+    moby.localdomain:
+      ansible_host: 192.168.10.11
+      ansible_port: 22
+      ansible_user: chrisbradley
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+    # vlan 20
     pve1.localdomain:
       ansible_host: 192.168.20.11
       ansible_port: 22
@@ -10,6 +17,7 @@ home:
       ansible_port: 22
       ansible_user: root
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+    # vlan 30
     kube1.localdomain:
       ansible_host: 192.168.30.11
       ansible_port: 22
