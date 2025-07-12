@@ -21,7 +21,7 @@ onboot=1
 ostype=l26
 machine="type=q35"
 scsi0="$datastore:0,discard=on,ssd=on,iothread=on,cache=writeback,import-from=$img"
-scsihw=virtio-scsi-pci
+scsihw=virtio-scsi-single
 serial0=socket
 tags="ansible,$tag"
 vga=serial0
