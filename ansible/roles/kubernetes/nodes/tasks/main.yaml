@@ -1,5 +1,5 @@
 ---
 - name: Configure Nodes
   ansible.builtin.include_tasks: configure-nodes.yaml
-- name: Configure Control Plane
-  ansible.builtin.include_tasks: configure-control-plane.yaml
+# - name: Configure Control Plane
+#   ansible.builtin.include_tasks: configure-control-plane.yaml

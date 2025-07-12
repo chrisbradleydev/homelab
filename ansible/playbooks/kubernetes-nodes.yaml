@@ -1,5 +1,8 @@
 - name: kubernetes-nodes.yaml
-  hosts: kube1.localdomain
+  hosts:
+    # - kube1.localdomain
+    - kube2.localdomain
+    - kube3.localdomain
   gather_facts: true
   tasks:
     - import_role:
