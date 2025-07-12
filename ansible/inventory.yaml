@@ -23,6 +23,16 @@ home:
       ansible_port: 22
       ansible_user: chrisbradley
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+    kube2.localdomain:
+      ansible_host: 192.168.30.12
+      ansible_port: 22
+      ansible_user: chrisbradley
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+    kube3.localdomain:
+      ansible_host: 192.168.30.13
+      ansible_port: 22
+      ansible_user: chrisbradley
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
     localhost:
       ansible_connection: local
 
