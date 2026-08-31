@@ -28,16 +28,16 @@
     var: kube_init.stdout
   when: kubeadm_initialized.failed
 
-- name: Create .kube directory
+- name: Create root .kube directory
   become: true
   ansible.builtin.file:
     path: /root/.kube
     state: directory
     owner: root
     group: root
-    mode: "0600"
+    mode: "0700"
 
-- name: Copy admin.conf
+- name: Copy admin.conf for root
   become: true
   ansible.builtin.copy:
     src: /etc/kubernetes/admin.conf
@@ -45,6 +45,26 @@
     remote_src: true
     owner: root
     group: root
+    mode: "0600"
+
+- name: Create .kube directory for {{ kubernetes_ciuser }}
+  become: true
+  ansible.builtin.file:
+    path: "/home/{{ kubernetes_ciuser }}/.kube"
+    state: directory
+    owner: "{{ kubernetes_ciuser }}"
+    group: "{{ kubernetes_ciuser }}"
+    mode: "0700"
+
+- name: Copy admin.conf for {{ kubernetes_ciuser }}
+  become: true
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ kubernetes_ciuser }}/.kube/config"
+    remote_src: true
+    owner: "{{ kubernetes_ciuser }}"
+    group: "{{ kubernetes_ciuser }}"
+    mode: "0600"
 
 - name: Add Balto's Helm PGP public key
   become: true
