@@ -1,6 +1,6 @@
 - name: debian-docker.yaml
   hosts:
-    - moby.localdomain
+    - dick.localdomain
   gather_facts: true
   tasks:
     - import_role:
