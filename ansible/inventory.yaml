@@ -1,13 +1,19 @@
 home:
   hosts:
-    # vlan 10
+    # vlan 1
     moby.localdomain:
-      ansible_host: 192.168.10.11
+      ansible_host: 192.168.1.11
       ansible_port: 22
       ansible_user: chrisbradley
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519
     dick.localdomain:
-      ansible_host: 192.168.10.12
+      ansible_host: 192.168.1.12
+      ansible_port: 22
+      ansible_user: chrisbradley
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+    # vlan 20
+    unifi.localdomain:
+      ansible_host: 192.168.10.10
       ansible_port: 22
       ansible_user: chrisbradley
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519
