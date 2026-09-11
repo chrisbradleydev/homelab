@@ -5,6 +5,7 @@
       - fzf
       - git
       - iperf3
+      - make
       - rsync
       - vim
       - zsh
