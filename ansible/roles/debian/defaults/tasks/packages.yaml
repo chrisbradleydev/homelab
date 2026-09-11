@@ -4,6 +4,8 @@
     name:
       - fzf
       - git
+      - iperf3
+      - rsync
       - vim
       - zsh
 
