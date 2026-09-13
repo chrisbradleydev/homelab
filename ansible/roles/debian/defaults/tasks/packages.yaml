@@ -7,6 +7,7 @@
       - iperf3
       - make
       - rsync
+      - unzip
       - vim
       - zsh
 
