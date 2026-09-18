@@ -6,6 +6,7 @@
       - git
       - iperf3
       - make
+      - ripgrep
       - rsync
       - unzip
       - vim
