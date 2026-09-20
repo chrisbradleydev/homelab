@@ -8,6 +8,14 @@
     src: ./files/kubeadm-config.yaml
     dest: /root/kubeadm-config.yaml
 
+- name: Copy kubeadm patches
+  become: true
+  ansible.builtin.copy:
+    src: ./files/kubeadm-patches/
+    dest: /root/kubeadm-patches/
+    directory_mode: "0700"
+    mode: "0600"
+
 - name: Check if Kubernetes is initialized
   become: true
   ansible.builtin.command: kubeadm token list

@@ -5,6 +5,9 @@ nodeRegistration:
   criSocket: "unix:///run/crio/crio.sock"
   imagePullPolicy: "IfNotPresent"
   imagePullSerial: true
+# Set memory requests to the control-plane static pods
+patches:
+  directory: /root/kubeadm-patches
 ---
 apiVersion: kubeadm.k8s.io/v1beta4
 kind: ClusterConfiguration
@@ -19,6 +22,7 @@ apiServer:
     - name: authorization-mode
       value: Node,RBAC
 ---
+# https://v1-32.docs.kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 cgroupDriver: systemd
@@ -26,4 +30,17 @@ eventBurst: 300
 eventRecordQPS: 100
 kubeAPIBurst: 300
 kubeAPIQPS: 100
-maxPods: 500
+maxPods: 110
+# Reserve headroom for the OS and for kubelet/CRI-O. The control plane is
+# deliberately schedulable (see tasks/configure-control-plane.yaml)
+systemReserved:
+  cpu: 200m
+  memory: 300Mi
+kubeReserved:
+  cpu: 200m
+  memory: 300Mi
+evictionHard:
+  memory.available: "200Mi"
+  nodefs.available: "10%"
+enforceNodeAllocatable:
+  - pods
