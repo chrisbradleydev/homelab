@@ -1,6 +1,6 @@
 - name: debian-defaults.yaml
   hosts:
-    - ahab.localdomain
+    - dick.localdomain
   gather_facts: true
   tasks:
     - import_role:

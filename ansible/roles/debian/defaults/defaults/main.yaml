@@ -1,0 +1,17 @@
+---
+# Set to true per host in inventory.yaml to provision Proton VPN.
+debian_protonvpn: false
+debian_protonvpn_lan_interface: eth0
+# Subnets that reach the host from other VLANs. Without a route here, replies go into the tunnel.
+# e.g. [{to: 192.168.10.0/24, via: 192.168.1.1}]
+debian_protonvpn_lan_routes: []
+# Interfaces NetworkManager leaves alone. Docker keeps its bridges.
+debian_protonvpn_nm_unmanaged:
+  - docker0
+  - br-*
+  - veth*
+# https://protonvpn.com/support/linux-vpn-debian-ubuntu
+debian_protonvpn_release_version: "1.0.8"
+debian_protonvpn_release_sha256: "0b14e71586b22e498eb20926c48c7b434b751149b1f2af9902ef1cfe6b03e180"
+# Extra arguments for protonvpn connect, e.g. "--country US". Free plans take none.
+debian_protonvpn_connect_args: "--country US"

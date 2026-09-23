@@ -11,11 +11,12 @@ home:
       ansible_port: 22
       ansible_user: chrisbradley
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519
-    ahab.localdomain:
-      ansible_host: 192.168.1.13
-      ansible_port: 22
-      ansible_user: chrisbradley
-      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+      debian_protonvpn: true
+      debian_protonvpn_lan_routes:
+        - to: 192.168.10.0/24
+          via: 192.168.1.1
+        - to: 192.168.40.11/32
+          via: 192.168.1.1
     # vlan 20
     unifi.localdomain:
       ansible_host: 192.168.10.10
@@ -51,6 +52,12 @@ home:
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519
     kube3.localdomain:
       ansible_host: 192.168.30.13
+      ansible_port: 22
+      ansible_user: chrisbradley
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+    # vlan 40
+    ahab.localdomain:
+      ansible_host: 192.168.40.11
       ansible_port: 22
       ansible_user: chrisbradley
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519

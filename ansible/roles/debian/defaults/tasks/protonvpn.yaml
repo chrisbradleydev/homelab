@@ -1,0 +1,482 @@
+# Proton VPN CLI on headless Debian, with the standard kill switch.
+# https://protonvpn.com/support/linux-cli
+# https://github.com/ProtonVPN/proton-vpn-cli
+
+- name: Check Proton VPN vars
+  ansible.builtin.assert:
+    that:
+      - debian_protonvpn_keyring_password | default('') | length > 0
+      - debian_protonvpn_username | default('') | length > 0
+      - debian_protonvpn_password | default('') | length > 0
+    fail_msg: Set debian_protonvpn_keyring_password, debian_protonvpn_username and debian_protonvpn_password in vars/main.yaml.
+    quiet: true
+
+- name: Set Proton VPN facts
+  ansible.builtin.set_fact:
+    protonvpn_lan: "{{ debian_protonvpn_lan_interface }}"
+    protonvpn_lan_mac: "{{ ansible_facts[debian_protonvpn_lan_interface].macaddress }}"
+    protonvpn_user_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_user_uid }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_user_uid }}/bus"
+
+- name: Install curl
+  become: true
+  ansible.builtin.apt:
+    name: curl
+    update_cache: true
+
+- name: Record LAN address
+  ansible.builtin.set_fact:
+    protonvpn_lan_address: "{{ ansible_facts[protonvpn_lan].ipv4.address }}"
+
+- name: Record house public address
+  ansible.builtin.command: curl -4 --silent --fail --max-time 15 --interface {{ protonvpn_lan }} https://icanhazip.com
+  register: protonvpn_house_ip
+  changed_when: false
+
+# NetworkManager takeover of the LAN interface
+
+- name: Read netplan config
+  become: true
+  ansible.builtin.slurp:
+    src: /etc/netplan/50-cloud-init.yaml
+  register: protonvpn_netplan_current
+
+- name: Check whether NetworkManager already owns the LAN
+  ansible.builtin.set_fact:
+    protonvpn_nm_owns_lan: "{{ (protonvpn_netplan_current.content | b64decode) is search('renderer: NetworkManager') }}"
+
+- name: Check for cloud-init
+  ansible.builtin.stat:
+    path: /etc/cloud/cloud.cfg.d
+  register: protonvpn_cloud_cfg
+
+- name: Stop cloud-init from rewriting netplan
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+    content: "network: {config: disabled}\n"
+    mode: "0644"
+  when: protonvpn_cloud_cfg.stat.exists
+
+- name: Back up netplan config
+  become: true
+  ansible.builtin.copy:
+    src: /etc/netplan/50-cloud-init.yaml
+    dest: /etc/netplan/50-cloud-init.yaml.bak
+    remote_src: true
+    force: false
+    mode: "0600"
+  when: not protonvpn_nm_owns_lan
+
+- name: Ensure NetworkManager directory exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/NetworkManager/conf.d
+    state: directory
+    recurse: true
+    mode: "0755"
+
+# Listed devices stay unmanaged, and nmcli cannot override the file.
+# The LAN is held back until netplan hands it over.
+- name: Write NetworkManager config before install
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/10-protonvpn.conf
+    content: |
+      [main]
+      no-auto-default=*
+      dns=systemd-resolved
+
+      [keyfile]
+      unmanaged-devices={{ (protonvpn_unmanaged | map('regex_replace', '^', 'interface-name:')) | join(';') }}
+    mode: "0644"
+  vars:
+    protonvpn_unmanaged: "{{ ([] if protonvpn_nm_owns_lan else [protonvpn_lan]) + debian_protonvpn_nm_unmanaged }}"
+
+- name: Install NetworkManager
+  become: true
+  ansible.builtin.apt:
+    name: network-manager
+    update_cache: true
+
+- name: Confirm the LAN did not move
+  when: not protonvpn_nm_owns_lan
+  block:
+    - name: Read LAN device state
+      ansible.builtin.command: nmcli -g GENERAL.STATE device show {{ protonvpn_lan }}
+      register: protonvpn_lan_state
+      changed_when: false
+
+    - name: Read LAN address
+      ansible.builtin.command: ip -4 -br addr show {{ protonvpn_lan }}
+      register: protonvpn_lan_ip
+      changed_when: false
+
+    - name: Assert the LAN is unmanaged and unchanged
+      ansible.builtin.assert:
+        that:
+          - protonvpn_lan_state.stdout is search('unmanaged')
+          - protonvpn_lan_ip.stdout is search(protonvpn_lan_address ~ '/')
+        fail_msg: >-
+          {{ protonvpn_lan }} changed after installing NetworkManager. Restore /etc/netplan/50-cloud-init.yaml.bak
+          and remove network-manager before anything else.
+
+- name: Hand the LAN to NetworkManager
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/10-protonvpn.conf
+    content: |
+      [main]
+      no-auto-default=*
+      dns=systemd-resolved
+
+      [keyfile]
+      unmanaged-devices={{ (debian_protonvpn_nm_unmanaged | map('regex_replace', '^', 'interface-name:')) | join(';') }}
+    mode: "0644"
+  register: protonvpn_nm_conf
+
+- name: Restart NetworkManager
+  become: true
+  ansible.builtin.systemd_service:
+    name: NetworkManager
+    state: restarted
+  when: protonvpn_nm_conf is changed
+
+# Proton sends everything through its own routing table, so replies to other VLANs enter
+# the tunnel. Its "lookup main suppress_prefixlength 0" rule runs first, so these routes win.
+# They must live in netplan, because NetworkManager drops manual routes on connect.
+# The kill switch holds its default route at metric 98.
+# The LAN stays at 100 or the kill switch silently stops working.
+# netplan ignores accept-ra on the NetworkManager backend and writes ipv6.method=ignore,
+# so the kernel keeps taking router advertisements. The passthrough disables IPv6 outright.
+- name: Write netplan config
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/netplan/50-cloud-init.yaml
+    content: |
+      network:
+        version: 2
+        ethernets:
+          {{ protonvpn_lan }}:
+            renderer: NetworkManager
+            match:
+              macaddress: "{{ protonvpn_lan_mac }}"
+            dhcp4: true
+            dhcp6: false
+            dhcp4-overrides:
+              route-metric: 100
+      {% if debian_protonvpn_lan_routes %}
+            routes: {{ debian_protonvpn_lan_routes | to_json }}
+      {% endif %}
+            set-name: "{{ protonvpn_lan }}"
+            networkmanager:
+              passthrough:
+                ipv6.method: "disabled"
+    mode: "0600"
+  register: protonvpn_netplan
+
+- name: Apply netplan
+  when: protonvpn_netplan is changed
+  block:
+    - name: Generate netplan
+      become: true
+      ansible.builtin.command: netplan generate
+      changed_when: false
+
+    # The SSH session can drop while the LAN moves.
+    - name: Apply netplan in the background
+      become: true
+      ansible.builtin.command: netplan apply
+      async: 120
+      poll: 0
+      changed_when: true
+
+    - name: Wait for the host to come back
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 180
+
+- name: Read LAN connection methods
+  ansible.builtin.command: nmcli -g ipv4.method,ipv6.method connection show netplan-{{ protonvpn_lan }}
+  register: protonvpn_lan_methods
+  changed_when: false
+
+- name: Read LAN address
+  ansible.builtin.command: ip -4 -br addr show {{ protonvpn_lan }}
+  register: protonvpn_lan_ip
+  changed_when: false
+
+- name: Read LAN route
+  ansible.builtin.command: ip -4 route show default dev {{ protonvpn_lan }}
+  register: protonvpn_lan_route
+  changed_when: false
+
+- name: Read IPv6 default routes
+  ansible.builtin.command: ip -6 route show default dev {{ protonvpn_lan }}
+  register: protonvpn_lan_route6
+  changed_when: false
+
+- name: Assert NetworkManager owns the LAN
+  ansible.builtin.assert:
+    that:
+      - protonvpn_lan_methods.stdout_lines == ['auto', 'disabled']
+      - protonvpn_lan_ip.stdout is search(protonvpn_lan_address ~ '/')
+      - protonvpn_lan_route.stdout is search('metric 100')
+      - protonvpn_lan_route6.stdout | length == 0
+    fail_msg: >-
+      {{ protonvpn_lan }} did not come back as expected. From the Proxmox console, copy
+      /etc/netplan/50-cloud-init.yaml.bak to /etc/netplan/50-cloud-init.yaml and run netplan apply.
+
+# gnome-keyring, unlocked at boot with no display
+
+- name: Install keyring and CLI helpers
+  become: true
+  ansible.builtin.apt:
+    name:
+      - gnome-keyring
+      - libsecret-tools
+      - python3-pexpect
+
+- name: Enable linger
+  become: true
+  ansible.builtin.command: loginctl enable-linger {{ ansible_user_id }}
+  args:
+    creates: /var/lib/systemd/linger/{{ ansible_user_id }}
+
+- name: Make Proton and systemd user directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0700"
+  with_items:
+    - "{{ ansible_user_dir }}/.config/proton"
+    - "{{ ansible_user_dir }}/.config/systemd/user"
+
+# The login keyring is created with this password on first start. Changing it later
+# does not rekey the keyring.
+- name: Write keyring password
+  ansible.builtin.copy:
+    dest: "{{ ansible_user_dir }}/.config/proton/keyring-password"
+    content: "{{ debian_protonvpn_keyring_password }}\n"
+    mode: "0600"
+  no_log: true
+
+# --login never checks for a running daemon. Start it from this unit only, and never restart it.
+- name: Write keyring unit
+  ansible.builtin.copy:
+    dest: "{{ ansible_user_dir }}/.config/systemd/user/gnome-keyring-proton.service"
+    content: |
+      [Unit]
+      Description=Unlock gnome-keyring secrets for Proton VPN
+      After=dbus.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/sh -c '/usr/bin/gnome-keyring-daemon --daemonize --login --components=secrets < %h/.config/proton/keyring-password; /usr/bin/gnome-keyring-daemon --start --components=secrets'
+
+      [Install]
+      WantedBy=default.target
+    mode: "0644"
+
+- name: Proton VPN user session
+  environment: "{{ protonvpn_user_env }}"
+  block:
+    - name: Start keyring unit
+      ansible.builtin.systemd_service:
+        name: gnome-keyring-proton.service
+        scope: user
+        daemon_reload: true
+        enabled: true
+        state: started
+
+    - name: Store keyring test secret
+      ansible.builtin.shell: printf 'ok' | secret-tool store --label proton-keyring-check service protonvpn account check
+      changed_when: false
+
+    - name: Look up keyring test secret
+      ansible.builtin.command: secret-tool lookup service protonvpn account check
+      register: protonvpn_keyring_check
+      changed_when: false
+      failed_when: protonvpn_keyring_check.stdout != 'ok'
+
+    - name: Clear keyring test secret
+      ansible.builtin.command: secret-tool clear service protonvpn account check
+      changed_when: false
+
+# SSH sessions have no seat, so Debian's polkit rule would prompt for admin.
+
+- name: Let the user control NetworkManager
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/polkit-1/rules.d/49-proton-nm.rules
+    content: |
+      polkit.addRule(function(action, subject) {
+          if (subject.user == "{{ ansible_user_id }}" &&
+              action.id.indexOf("org.freedesktop.NetworkManager.") == 0) {
+              return polkit.Result.YES;
+          }
+      });
+    mode: "0644"
+  register: protonvpn_polkit
+
+- name: Restart polkit
+  become: true
+  ansible.builtin.systemd_service:
+    name: polkit
+    state: restarted
+  when: protonvpn_polkit is changed
+
+# Proton's stable repository. Do not verify the deb with dpkg-sig; it is signed with a different key.
+# https://protonvpn.com/support/linux-vpn-debian-ubuntu
+
+- name: Download Proton VPN repository package
+  ansible.builtin.get_url:
+    url: "https://repo.protonvpn.com/debian/dists/stable/main/binary-all/protonvpn-stable-release_{{ debian_protonvpn_release_version }}_all.deb"
+    dest: "/tmp/protonvpn-stable-release_{{ debian_protonvpn_release_version }}_all.deb"
+    checksum: "sha256:{{ debian_protonvpn_release_sha256 }}"
+    mode: "0644"
+
+- name: Install Proton VPN repository package
+  become: true
+  ansible.builtin.apt:
+    deb: "/tmp/protonvpn-stable-release_{{ debian_protonvpn_release_version }}_all.deb"
+
+- name: Install Proton VPN CLI
+  become: true
+  ansible.builtin.apt:
+    name: proton-vpn-cli
+    update_cache: true
+
+- name: Proton VPN sign-in and connection
+  environment: "{{ protonvpn_user_env }}"
+  block:
+    - name: Read Proton VPN settings
+      ansible.builtin.command: protonvpn config list
+      register: protonvpn_config
+      changed_when: false
+      failed_when: protonvpn_config.rc != 0 and 'Authentication required' not in protonvpn_config.stderr
+
+    # The CLI reads the password and 2FA token from the TTY. Pass a fresh token with
+    # -e debian_protonvpn_totp=123456 when the account has a second factor.
+    - name: Sign in to Proton VPN
+      ansible.builtin.expect:
+        command: protonvpn signin {{ debian_protonvpn_username }}
+        responses:
+          "(?i)password:": "{{ debian_protonvpn_password }}"
+          "2FA Token:": "{{ debian_protonvpn_totp | default('') }}"
+        timeout: 120
+      when: protonvpn_config.rc != 0
+      no_log: true
+
+    - name: Read Proton VPN settings after sign-in
+      ansible.builtin.command: protonvpn config list
+      register: protonvpn_config
+      changed_when: false
+
+    - name: Read active connections
+      ansible.builtin.command: nmcli -t -f NAME,TYPE,DEVICE connection show --active
+      register: protonvpn_active
+      changed_when: false
+
+    # Sign-out deletes these settings. kill-switch refuses to change while connected.
+    - name: Set kill switch and IPv6
+      when: >-
+        protonvpn_config.stdout is not search('^kill-switch\s+standard\s*$', multiline=True)
+        or protonvpn_config.stdout is not search('^ipv6\s+off\s*$', multiline=True)
+      block:
+        - name: Disconnect Proton VPN
+          ansible.builtin.command: protonvpn disconnect
+          when: protonvpn_active.stdout is search(':proton0$', multiline=True)
+
+        - name: Set kill switch to standard
+          ansible.builtin.command: protonvpn config set kill-switch standard
+
+        - name: Turn IPv6 off
+          ansible.builtin.command: protonvpn config set ipv6 off
+          register: protonvpn_settings
+
+    # The CLI exits once the tunnel is up and NetworkManager keeps it.
+    - name: Write Proton VPN unit
+      ansible.builtin.copy:
+        dest: "{{ ansible_user_dir }}/.config/systemd/user/protonvpn.service"
+        content: |
+          [Unit]
+          Description=Proton VPN
+          After=gnome-keyring-proton.service
+          Requires=gnome-keyring-proton.service
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          TimeoutStartSec=180
+          ExecStartPre=/usr/bin/nm-online -q --timeout=90
+          ExecStart=/usr/bin/protonvpn connect {{ debian_protonvpn_connect_args }}
+          ExecStop=/usr/bin/protonvpn disconnect
+          Restart=on-failure
+          RestartSec=20
+
+          [Install]
+          WantedBy=default.target
+        mode: "0644"
+      register: protonvpn_unit
+
+    - name: Connect Proton VPN
+      ansible.builtin.systemd_service:
+        name: protonvpn.service
+        scope: user
+        daemon_reload: "{{ protonvpn_unit is changed }}"
+        state: "{{ 'restarted' if (protonvpn_unit is changed or protonvpn_settings is changed) else 'started' }}"
+      register: protonvpn_connect
+      until: protonvpn_connect is succeeded
+      retries: 3
+      delay: 20
+
+    # Leak checks. The unit is enabled at boot only after these pass.
+
+    - name: Read active connections
+      ansible.builtin.command: nmcli -t -f NAME,TYPE,DEVICE connection show --active
+      register: protonvpn_active
+      changed_when: false
+
+    - name: Read VPN public address
+      ansible.builtin.command: curl -4 --silent --fail --max-time 15 https://icanhazip.com
+      register: protonvpn_vpn_ip
+      changed_when: false
+
+    - name: Read tunnel DNS
+      ansible.builtin.command: resolvectl {{ item }} proton0
+      register: protonvpn_dns
+      changed_when: false
+      with_items:
+        - dns
+        - domain
+        - default-route
+
+    - name: Read LAN DNS default route
+      ansible.builtin.command: resolvectl default-route {{ protonvpn_lan }}
+      register: protonvpn_lan_dns
+      changed_when: false
+
+    - name: Assert no leaks
+      ansible.builtin.assert:
+        that:
+          - protonvpn_active.stdout is search('^ProtonVPN .*:wireguard:proton0$', multiline=True)
+          - protonvpn_active.stdout is search('^pvpn-killswitch:dummy:pvpnksintrf0$', multiline=True)
+          - protonvpn_vpn_ip.stdout != protonvpn_house_ip.stdout
+          - protonvpn_dns.results[0].stdout is search('10\.2\.0\.1')
+          - protonvpn_dns.results[1].stdout is search('~\.')
+          - protonvpn_dns.results[2].stdout is search('yes$')
+          - protonvpn_lan_dns.stdout is search('no$')
+        fail_msg: Proton VPN is leaking. Run protonvpn disconnect, check protonvpn config list and connect again.
+
+    - name: Enable Proton VPN at boot
+      ansible.builtin.systemd_service:
+        name: protonvpn.service
+        scope: user
+        enabled: true
+
+    - name: Show VPN public address
+      ansible.builtin.debug:
+        msg: "House {{ protonvpn_house_ip.stdout }}, VPN {{ protonvpn_vpn_ip.stdout }}"

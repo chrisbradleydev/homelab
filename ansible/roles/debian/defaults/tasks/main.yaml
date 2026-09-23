@@ -1,7 +1,14 @@
 ---
-- name: Packages
-  ansible.builtin.include_tasks: packages.yaml
-- name: Dotfiles
-  ansible.builtin.include_tasks: dotfiles.yaml
+# - name: Packages
+#   ansible.builtin.include_tasks: packages.yaml
+# - name: Dotfiles
+#   ansible.builtin.include_tasks: dotfiles.yaml
 # - name: Apps
 #   ansible.builtin.include_tasks: apps.yaml
+- name: Proton VPN
+  ansible.builtin.include_tasks:
+    file: protonvpn.yaml
+    apply:
+      tags: protonvpn
+  when: debian_protonvpn | bool
+  tags: protonvpn

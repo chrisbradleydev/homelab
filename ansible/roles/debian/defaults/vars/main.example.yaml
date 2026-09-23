@@ -11,3 +11,7 @@ debian_symlinks:
     dest: ".vimrc"
   - src: ".zshrc"
     dest: ".zshrc"
+# Proton VPN, only used on hosts with debian_protonvpn: true
+debian_protonvpn_keyring_password: "changeme"
+debian_protonvpn_username: "user@proton.me"
+debian_protonvpn_password: "changeme"
