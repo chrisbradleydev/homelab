@@ -2,6 +2,7 @@
   become: true
   ansible.builtin.apt:
     name:
+      - bind9-dnsutils
       - fzf
       - git
       - iperf3
