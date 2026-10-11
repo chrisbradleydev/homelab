@@ -4,9 +4,36 @@ csiConfig:
       - "192.168.20.11:6789"
       - "192.168.20.12:6789"
       - "192.168.20.13:6789"
+# The chart applies nodeplugin.plugin.resources to every cephcsi container in
+# both pods: csi-rbdplugin, csi-rbdplugin-controller, and liveness-prometheus.
+nodeplugin:
+  plugin:
+    resources:
+      requests:
+        memory: 32Mi
+  registrar:
+    resources:
+      requests:
+        memory: 16Mi
 provisioner:
   name: provisioner
   replicaCount: 1
+  provisioner:
+    resources:
+      requests:
+        memory: 32Mi
+  attacher:
+    resources:
+      requests:
+        memory: 32Mi
+  resizer:
+    resources:
+      requests:
+        memory: 32Mi
+  snapshotter:
+    resources:
+      requests:
+        memory: 32Mi
 secret:
   name: csi-cephfs-secret
   userID: "${user-id}"

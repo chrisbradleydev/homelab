@@ -8,6 +8,12 @@ cni:
   # Make Cilium take ownership over the `/etc/cni/net.d` directory on the node
   exclusive: false
 
+envoy:
+  # Memory request for the cilium-envoy DaemonSet
+  resources:
+    requests:
+      memory: 32Mi
+
 hubble:
   # Enable Hubble
   enabled: true
@@ -30,6 +36,18 @@ kubeProxyReplacement: "true"
 l2announcements:
   # Enable L2 announcements
   enabled: false
+
+operator:
+  # Memory request for cilium-operator
+  resources:
+    requests:
+      memory: 64Mi
+
+# Memory request for the cilium agent. This request and the envoy and operator
+# requests sit just above what each pod uses on an idle node.
+resources:
+  requests:
+    memory: 160Mi
 
 # Roll out cilium agent pods automatically when configmap is updated
 rollOutCiliumPods: true
