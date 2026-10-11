@@ -3,6 +3,7 @@ csiConfig:
     monitors:
       - "192.168.20.11:6789"
       - "192.168.20.12:6789"
+      - "192.168.20.13:6789"
 provisioner:
   name: provisioner
   replicaCount: 1
