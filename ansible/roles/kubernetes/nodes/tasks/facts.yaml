@@ -1,0 +1,30 @@
+- name: Check whether the node has joined a cluster
+  become: true
+  ansible.builtin.stat:
+    path: /etc/kubernetes/kubelet.conf
+    get_checksum: false
+  register: kubernetes_kubelet_conf
+
+- name: Check whether the control plane is initialized
+  become: true
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+    get_checksum: false
+  register: kubernetes_admin_conf
+
+- name: Set node facts
+  ansible.builtin.set_fact:
+    kubernetes_node_joined: "{{ kubernetes_kubelet_conf.stat.exists }}"
+    kubernetes_control_plane_initialized: "{{ kubernetes_admin_conf.stat.exists }}"
+    kubernetes_is_control_plane: "{{ inventory_hostname in groups['kubernetes_control_plane'] }}"
+    kubernetes_is_worker: "{{ inventory_hostname in groups['kubernetes_workers'] }}"
+    kubernetes_is_first_control_plane: "{{ inventory_hostname == groups['kubernetes_control_plane'][0] }}"
+
+# The role never runs kubeadm join --control-plane. A second control plane
+# host would run kubeadm init instead and create a separate cluster.
+- name: Verify there is exactly one control plane node
+  ansible.builtin.assert:
+    that: groups['kubernetes_control_plane'] | length == 1
+    fail_msg: >-
+      kubernetes_control_plane lists {{ groups['kubernetes_control_plane'] | length }} hosts.
+      This role supports exactly one control plane node.

@@ -1,0 +1,36 @@
+- name: Create backup directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ kubernetes_backup_dir }}/{{ ansible_facts['date_time']['iso8601_basic_short'] }}-before-v{{ kubernetes_hop_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  register: kubernetes_backup
+
+# /var/lib/etcd is a hostPath mount of the etcd static pod
+- name: Snapshot etcd
+  become: true
+  ansible.builtin.command: >-
+    kubectl --namespace kube-system exec etcd-{{ ansible_facts['hostname'] }} --
+    etcdctl --endpoints=https://127.0.0.1:2379
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt
+    --cert=/etc/kubernetes/pki/etcd/server.crt
+    --key=/etc/kubernetes/pki/etcd/server.key
+    snapshot save /var/lib/etcd/upgrade-snapshot.db
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+
+- name: Move etcd snapshot into backup directory
+  become: true
+  ansible.builtin.command: mv /var/lib/etcd/upgrade-snapshot.db {{ kubernetes_backup.path }}/etcd-snapshot.db
+
+# kubeadm keeps its own manifest and etcd copies under /etc/kubernetes/tmp
+- name: Archive Kubernetes configuration
+  become: true
+  ansible.builtin.command: >-
+    tar --create --gzip --file {{ kubernetes_backup.path }}/kubernetes-config.tar.gz
+    --exclude=etc/kubernetes/tmp
+    --directory / etc/kubernetes var/lib/kubelet/config.yaml var/lib/kubelet/kubeadm-flags.env
+  args:
+    creates: "{{ kubernetes_backup.path }}/kubernetes-config.tar.gz"

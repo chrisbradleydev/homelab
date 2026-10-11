@@ -1,0 +1,33 @@
+---
+# Target versions. New nodes get these versions. Existing nodes are upgraded
+# to them one minor version at a time: Cilium first, then Kubernetes.
+kubernetes_version: "1.37.1" # kubeadm, kubelet and kubectl
+kubernetes_cri_o_version: "1.37.2"
+kubernetes_cilium_version: "1.20.2"
+kubernetes_helm_version: "4.3.0"
+
+# Cluster networking
+kubernetes_api_port: 6443
+kubernetes_control_plane_address: "{{ hostvars[groups['kubernetes_control_plane'][0]]['ansible_host'] }}"
+kubernetes_control_plane_endpoint: "{{ kubernetes_control_plane_address }}:{{ kubernetes_api_port }}"
+kubernetes_service_subnet: "172.16.16.0/20"
+kubernetes_pod_subnet: "172.16.0.0/20"
+kubernetes_dns_domain: "cluster.local"
+
+# Cilium replaces kube-proxy (kubeProxyReplacement in templates/cilium.yaml.j2),
+# so kubeadm skips the kube-proxy addon. The mode below is only used if the
+# addon is ever enabled again.
+kubernetes_kube_proxy_mode: "nftables"
+
+# Timeouts
+kubernetes_drain_timeout: "300s"
+kubernetes_rollout_timeout: "600s"
+kubernetes_node_ready_retries: 60 # x 10 seconds
+
+# Paths on the control plane
+kubernetes_kubeconfig: /etc/kubernetes/admin.conf
+kubernetes_backup_dir: /root/kubernetes-upgrade-backups
+
+# Derived values, do not override
+kubernetes_minor: "{{ kubernetes_version.split('.')[:2] | join('.') }}"
+kubernetes_cilium_minor: "{{ kubernetes_cilium_version.split('.')[:2] | join('.') }}"

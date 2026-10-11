@@ -1,0 +1,78 @@
+# One Kubernetes minor version hop: control plane first, then workers one at a time.
+- name: Switch control plane apt repositories to v{{ kubernetes_hop_minor }}
+  ansible.builtin.include_tasks: repos.yaml
+  vars:
+    kubernetes_repo_minor: "{{ kubernetes_hop_minor }}"
+
+# Intermediate hops use the newest patch release of that minor version. The
+# final hop uses the pinned versions.
+- name: Find v{{ kubernetes_hop_minor }} packages
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail &&
+      apt-cache madison {{ item.name }} | awk '{print $3}' | grep -E '^{{ item.pattern | regex_escape }}' | sort -V | tail -1
+    executable: /bin/bash
+  loop:
+    - name: kubeadm
+      pattern: "{{ (kubernetes_version ~ '-') if kubernetes_hop_minor == kubernetes_minor else (kubernetes_hop_minor ~ '.') }}"
+    - name: cri-o
+      pattern: "{{ (kubernetes_cri_o_version ~ '-') if kubernetes_hop_minor == kubernetes_minor else (kubernetes_hop_minor ~ '.') }}"
+  register: kubernetes_hop_packages
+  changed_when: false
+  failed_when: kubernetes_hop_packages.rc != 0 or kubernetes_hop_packages.stdout == ''
+
+- name: Set hop versions
+  ansible.builtin.set_fact:
+    kubernetes_hop_kubeadm_package: "{{ kubernetes_hop_packages.results[0].stdout }}"
+    kubernetes_hop_cri_o_package: "{{ kubernetes_hop_packages.results[1].stdout }}"
+    kubernetes_hop_version: "{{ kubernetes_hop_packages.results[0].stdout | regex_replace('-.*$', '') }}"
+
+- name: Verify every node is Ready before upgrading to v{{ kubernetes_hop_version }}
+  become: true
+  ansible.builtin.command: >-
+    kubectl get nodes --output jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}'
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_nodes_ready
+  changed_when: false
+  failed_when: kubernetes_nodes_ready.stdout.split() | unique != ['True']
+
+- name: Back up etcd and the Kubernetes configuration
+  ansible.builtin.include_tasks: backup.yaml
+
+- name: Upgrade control plane nodes to v{{ kubernetes_hop_version }}
+  ansible.builtin.include_tasks: upgrade-node.yaml
+  vars:
+    kubernetes_upgrade_node_control_plane: true
+  loop: "{{ groups['kubernetes_control_plane'] }}"
+  loop_control:
+    loop_var: kubernetes_upgrade_node
+
+- name: Upgrade worker nodes to v{{ kubernetes_hop_version }}
+  ansible.builtin.include_tasks: upgrade-node.yaml
+  vars:
+    kubernetes_upgrade_node_control_plane: false
+  loop: "{{ groups['kubernetes_workers'] }}"
+  loop_control:
+    loop_var: kubernetes_upgrade_node
+
+- name: Wait for CoreDNS
+  become: true
+  ansible.builtin.command: >-
+    kubectl --namespace kube-system rollout status deployment/coredns --timeout={{ kubernetes_rollout_timeout }}
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  changed_when: false
+
+- name: Verify every node runs v{{ kubernetes_hop_version }}
+  become: true
+  ansible.builtin.command: kubectl get nodes --output jsonpath='{.items[*].status.nodeInfo.kubeletVersion}'
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_hop_node_versions
+  changed_when: false
+  failed_when: kubernetes_hop_node_versions.stdout.split() | unique != ['v' ~ kubernetes_hop_version]
+
+# kubeadm renewed the certificates embedded in admin.conf
+- name: Refresh kubeconfig files
+  ansible.builtin.include_tasks: kubeconfig.yaml

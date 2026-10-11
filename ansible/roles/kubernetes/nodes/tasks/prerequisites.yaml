@@ -1,0 +1,67 @@
+- name: Install dependencies
+  become: true
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - ceph-common
+      - curl
+      - gpg
+      - iptables
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Load kernel modules
+  become: true
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+    persistent: present
+  loop:
+    - br_netfilter
+    - overlay
+    - rbd
+
+# https://kubernetes.io/docs/setup/production-environment/container-runtimes/#prerequisite-ipv4-forwarding-optional
+- name: Set sysctl params
+  become: true
+  ansible.builtin.copy:
+    owner: root
+    group: root
+    mode: "0644"
+    dest: /etc/sysctl.d/local.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables  = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward                 = 1
+  register: kubernetes_sysctl
+
+- name: Apply sysctl params without reboot
+  become: true
+  ansible.builtin.command: sysctl --system
+  when: kubernetes_sysctl is changed
+
+- name: Disable swap
+  become: true
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+
+# The kubelet refuses to start on cgroup v1 since Kubernetes v1.37
+# https://kubernetes.io/docs/concepts/architecture/cgroups/
+- name: Verify the node uses cgroup v2
+  ansible.builtin.command: stat -fc %T /sys/fs/cgroup/
+  register: kubernetes_cgroup
+  changed_when: false
+  failed_when: kubernetes_cgroup.stdout != "cgroup2fs"
+
+- name: Add Kubernetes and CRI-O apt repositories
+  ansible.builtin.include_tasks: repos.yaml
+  vars:
+    kubernetes_repo_minor: "{{ kubernetes_minor }}"
+
+# crictl for debugging the container runtime; unpinned, follows the repo minor
+- name: Install cri-tools
+  become: true
+  ansible.builtin.apt:
+    name: cri-tools
+    state: present

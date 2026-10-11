@@ -1,0 +1,33 @@
+- name: Wait for Cilium DaemonSets
+  become: true
+  ansible.builtin.command: >-
+    kubectl --namespace kube-system rollout status daemonset/{{ item }}
+    --timeout={{ kubernetes_rollout_timeout }}
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  loop:
+    - cilium
+    - cilium-envoy
+  changed_when: false
+
+- name: Wait for Cilium operator
+  become: true
+  ansible.builtin.command: >-
+    kubectl --namespace kube-system rollout status deployment/cilium-operator
+    --timeout={{ kubernetes_rollout_timeout }}
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  changed_when: false
+
+- name: Verify Cilium status
+  become: true
+  ansible.builtin.command: >-
+    kubectl --namespace kube-system exec daemonset/cilium --container cilium-agent --
+    cilium status --brief
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_cilium_status
+  until: kubernetes_cilium_status.rc == 0 and kubernetes_cilium_status.stdout is search('OK')
+  retries: 30
+  delay: 10
+  changed_when: false

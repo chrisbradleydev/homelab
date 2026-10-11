@@ -1,0 +1,73 @@
+- name: Copy kubeadm config
+  become: true
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: /root/kubeadm-config.yaml
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Copy kubeadm patches
+  become: true
+  ansible.builtin.copy:
+    src: kubeadm-patches/
+    dest: /root/kubeadm-patches/
+    owner: root
+    group: root
+    directory_mode: "0700"
+    mode: "0600"
+
+- name: Initialize Kubernetes cluster
+  become: true
+  ansible.builtin.shell:
+    cmd: set -o pipefail && kubeadm init --upload-certs --config /root/kubeadm-config.yaml 2>&1 | tee /root/kubeadm-init.log
+    executable: /bin/bash
+  when: not kubernetes_control_plane_initialized
+
+- name: Install kubeconfig files
+  ansible.builtin.include_tasks: kubeconfig.yaml
+
+# https://helm.sh/docs/intro/install/#from-apt-debianubuntu
+- name: Add Helm apt repository
+  become: true
+  ansible.builtin.deb822_repository:
+    name: helm
+    types: deb
+    uris: https://packages.buildkite.com/helm-linux/helm-debian/any/
+    suites: any
+    components: main
+    signed_by: https://packages.buildkite.com/helm-linux/helm-debian/gpgkey
+    state: present
+  register: kubernetes_helm_apt_repo
+
+- name: Remove legacy Helm apt source and key
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/helm.list
+    - /etc/apt/trusted.gpg.d/helm.asc
+
+- name: Install Helm
+  become: true
+  ansible.builtin.apt:
+    name: "helm={{ kubernetes_helm_version }}-*"
+    state: present
+    update_cache: "{{ kubernetes_helm_apt_repo is changed }}"
+
+- name: Allow pod scheduling on the control plane
+  become: true
+  ansible.builtin.command: kubectl taint nodes --all node-role.kubernetes.io/control-plane-
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_taint
+  changed_when: "'untainted' in kubernetes_taint.stdout"
+  failed_when: kubernetes_taint.rc != 0 and 'not found' not in kubernetes_taint.stderr
+
+- name: Install Cilium
+  ansible.builtin.include_tasks: cilium.yaml
+
+- name: Remove kube-proxy
+  ansible.builtin.include_tasks: kube-proxy.yaml
+  when: kubernetes_is_first_control_plane

@@ -21,8 +21,8 @@ ipam:
     clusterPoolIPv4PodCIDRList: ["10.0.0.0/8"]
 
 # Kubernetes service host & port
-k8sServiceHost: "192.168.30.11"
-k8sServicePort: "6443"
+k8sServiceHost: "{{ kubernetes_control_plane_address }}"
+k8sServicePort: "{{ kubernetes_api_port }}"
 
 # https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/
 kubeProxyReplacement: "true"

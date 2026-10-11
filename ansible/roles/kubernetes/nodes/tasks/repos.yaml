@@ -1,0 +1,46 @@
+# Points apt at the Kubernetes and CRI-O repositories for one minor version.
+# Runs on kubernetes_repo_host when set, otherwise on the current host.
+# https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/change-package-repository/
+- name: Add Kubernetes apt repository v{{ kubernetes_repo_minor }}
+  become: true
+  delegate_to: "{{ kubernetes_repo_host | default(inventory_hostname) }}"
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    types: deb
+    uris: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_repo_minor }}/deb/"
+    suites: /
+    signed_by: "https://pkgs.k8s.io/core:/stable:/v{{ kubernetes_repo_minor }}/deb/Release.key"
+    state: present
+
+# https://cri-o.io/
+- name: Add CRI-O apt repository v{{ kubernetes_repo_minor }}
+  become: true
+  delegate_to: "{{ kubernetes_repo_host | default(inventory_hostname) }}"
+  ansible.builtin.deb822_repository:
+    name: cri-o
+    types: deb
+    uris: "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{{ kubernetes_repo_minor }}/deb/"
+    suites: /
+    signed_by: "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v{{ kubernetes_repo_minor }}/deb/Release.key"
+    state: present
+
+- name: Remove legacy apt sources and keyrings
+  become: true
+  delegate_to: "{{ kubernetes_repo_host | default(inventory_hostname) }}"
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/kubernetes.list
+    - /etc/apt/sources.list.d/cri-o.list
+    - /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    - /etc/apt/keyrings/kubernetes-apt-keyring.gpg~
+    - /etc/apt/keyrings/cri-o-apt-keyring.gpg
+    - /etc/apt/keyrings/cri-o-apt-keyring.gpg~
+
+- name: Update apt cache
+  become: true
+  delegate_to: "{{ kubernetes_repo_host | default(inventory_hostname) }}"
+  ansible.builtin.apt:
+    update_cache: true
+  changed_when: false

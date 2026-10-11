@@ -1,0 +1,107 @@
+# Cilium replaces kube-proxy (kubeProxyReplacement in templates/cilium.yaml.j2).
+# New clusters never get the addon (proxy.disabled in the kubeadm config);
+# this removes it from clusters created before that setting.
+# https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/
+- name: Get kubeadm ClusterConfiguration
+  become: true
+  ansible.builtin.command: >-
+    kubectl --namespace kube-system get configmap kubeadm-config --output jsonpath='{.data.ClusterConfiguration}'
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_cluster_configuration
+  changed_when: false
+
+# Keeps kubeadm upgrade from reinstalling the addon
+- name: Disable the kube-proxy addon in the kubeadm ClusterConfiguration
+  become: true
+  ansible.builtin.command: >-
+    kubectl --namespace kube-system patch configmap kubeadm-config --type merge
+    --patch {{ {'data': {'ClusterConfiguration': kubernetes_cluster_configuration_patched | to_nice_yaml(indent=2)}} | to_json | quote }}
+  vars:
+    kubernetes_cluster_configuration_patched: >-
+      {{ kubernetes_cluster_configuration.stdout | from_yaml | combine({'proxy': {'disabled': true}}, recursive=True) }}
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  when: not ((kubernetes_cluster_configuration.stdout | from_yaml).proxy.disabled | default(false))
+
+- name: Verify Cilium kube-proxy replacement is active
+  become: true
+  ansible.builtin.command: kubectl --namespace kube-system exec daemonset/cilium --container cilium-agent -- cilium-dbg status
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_cilium_full_status
+  changed_when: false
+  failed_when: kubernetes_cilium_full_status.stdout is not search('KubeProxyReplacement:\s+True')
+
+- name: Get kube-proxy DaemonSet
+  become: true
+  ansible.builtin.command: kubectl --namespace kube-system get daemonset kube-proxy --ignore-not-found --output name
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_kube_proxy_daemonset
+  changed_when: false
+
+- name: Delete kube-proxy
+  when: kubernetes_kube_proxy_daemonset.stdout != ''
+  block:
+    - name: Delete kube-proxy objects
+      become: true
+      ansible.builtin.command: >-
+        kubectl --namespace kube-system delete --ignore-not-found
+        daemonset/kube-proxy configmap/kube-proxy serviceaccount/kube-proxy
+        role/kube-proxy rolebinding/kube-proxy
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+
+    - name: Delete kube-proxy cluster role binding
+      become: true
+      ansible.builtin.command: kubectl delete --ignore-not-found clusterrolebinding/kubeadm:node-proxier
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+
+    - name: Wait for kube-proxy pods to terminate
+      become: true
+      ansible.builtin.command: >-
+        kubectl --namespace kube-system wait --for=delete pod --selector k8s-app=kube-proxy
+        --timeout={{ kubernetes_drain_timeout }}
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      changed_when: false
+
+# kube-proxy restores its rules the moment it sees them flushed, and it can
+# outlive its pod object by a few seconds, so wait for the process itself.
+- name: Wait for the kube-proxy process to exit
+  become: true
+  delegate_to: "{{ item }}"
+  ansible.builtin.command: pgrep --exact kube-proxy
+  loop: "{{ groups['kubernetes'] }}"
+  register: kubernetes_kube_proxy_process
+  until: kubernetes_kube_proxy_process.rc == 1
+  retries: 30
+  delay: 5
+  changed_when: false
+  failed_when: kubernetes_kube_proxy_process.rc not in [0, 1]
+
+# KUBE-SERVICES only exists when kube-proxy has programmed the node. The
+# kubelet recreates its own KUBE-* chains on its next sync.
+- name: Remove kube-proxy iptables rules
+  become: true
+  delegate_to: "{{ item }}"
+  ansible.builtin.shell:
+    # Capture the ruleset first: grep -q would close the pipe early and make
+    # pipefail report the save as failed.
+    cmd: |
+      set -o pipefail
+      changed=0
+      for cmd in iptables ip6tables; do
+        rules=$("$cmd-save")
+        if grep -q '^:KUBE-SERVICES' <<< "$rules"; then
+          grep -v KUBE <<< "$rules" | "$cmd-restore"
+          changed=1
+        fi
+      done
+      echo "changed=$changed"
+    executable: /bin/bash
+  loop: "{{ groups['kubernetes'] }}"
+  register: kubernetes_kube_proxy_rules
+  changed_when: "'changed=1' in kubernetes_kube_proxy_rules.stdout"

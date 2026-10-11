@@ -1,0 +1,33 @@
+- name: Join the cluster
+  when: not kubernetes_node_joined
+  block:
+    - name: Create join command
+      become: true
+      delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+      ansible.builtin.command: kubeadm token create --ttl 15m --print-join-command
+      register: kubernetes_join_command
+      changed_when: false
+      no_log: true
+
+    - name: Join node to the cluster
+      become: true
+      ansible.builtin.shell:
+        cmd: set -o pipefail && {{ kubernetes_join_command.stdout }} 2>&1 | tee /root/kubeadm-join.log
+        executable: /bin/bash
+
+- name: Label worker node
+  become: true
+  delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+  ansible.builtin.command: kubectl label node {{ ansible_facts['hostname'] }} node-role.kubernetes.io/worker= --overwrite
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_worker_label
+  changed_when: "'not labeled' not in kubernetes_worker_label.stdout"
+
+- name: Wait for the node to become Ready
+  become: true
+  delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+  ansible.builtin.command: kubectl wait --for=condition=Ready node/{{ ansible_facts['hostname'] }} --timeout={{ kubernetes_rollout_timeout }}
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  changed_when: false

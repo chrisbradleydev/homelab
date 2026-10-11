@@ -1,0 +1,155 @@
+# Upgrade one node. kubectl runs on the first control plane node; everything
+# else is delegated to the node being upgraded.
+# https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/upgrading-linux-nodes/
+- name: Set node name
+  ansible.builtin.set_fact:
+    kubernetes_upgrade_node_name: "{{ hostvars[kubernetes_upgrade_node]['ansible_facts']['hostname'] }}"
+    kubernetes_upgrade_node_first_control_plane: "{{ kubernetes_upgrade_node == groups['kubernetes_control_plane'][0] }}"
+
+- name: Get installed kubelet and CRI-O versions on {{ kubernetes_upgrade_node_name }}
+  become: true
+  delegate_to: "{{ kubernetes_upgrade_node }}"
+  ansible.builtin.command: dpkg-query --showformat='${Package} ${Version}\n' --show kubelet cri-o
+  register: kubernetes_upgrade_node_packages
+  changed_when: false
+
+# Both checks strip the Debian revision ("-1.1") and compare upstream
+# versions. When only CRI-O is behind, the next block skips the kubeadm
+# steps but still drains the node, upgrades CRI-O, and restarts CRI-O and
+# the kubelet.
+- name: Set {{ kubernetes_upgrade_node_name }} upgrade steps
+  ansible.builtin.set_fact:
+    kubernetes_upgrade_node_kubernetes: >-
+      {{ kubernetes_upgrade_node_installed['kubelet'] | regex_replace('-.*$', '') is version(kubernetes_hop_version, '<') }}
+    kubernetes_upgrade_node_cri_o: >-
+      {{ kubernetes_upgrade_node_installed['cri-o'] | regex_replace('-.*$', '')
+         is version(kubernetes_hop_cri_o_package | regex_replace('-.*$', ''), '<') }}
+  vars:
+    kubernetes_upgrade_node_installed: "{{ dict(kubernetes_upgrade_node_packages.stdout_lines | map('split')) }}"
+
+- name: Upgrade {{ kubernetes_upgrade_node_name }} to v{{ kubernetes_hop_version }} / CRI-O {{ kubernetes_hop_cri_o_package }}
+  when: kubernetes_upgrade_node_kubernetes or kubernetes_upgrade_node_cri_o
+  block:
+    - name: Switch apt repositories on {{ kubernetes_upgrade_node_name }} to v{{ kubernetes_hop_minor }}
+      ansible.builtin.include_tasks: repos.yaml
+      vars:
+        kubernetes_repo_minor: "{{ kubernetes_hop_minor }}"
+        kubernetes_repo_host: "{{ kubernetes_upgrade_node }}"
+
+    - name: Upgrade kubeadm and the Kubernetes components
+      when: kubernetes_upgrade_node_kubernetes
+      block:
+        - name: Install kubeadm {{ kubernetes_hop_kubeadm_package }}
+          become: true
+          delegate_to: "{{ kubernetes_upgrade_node }}"
+          ansible.builtin.apt:
+            name: "kubeadm={{ kubernetes_hop_kubeadm_package }}"
+            state: present
+            allow_change_held_packages: true
+
+        - name: Verify kubeadm version
+          become: true
+          delegate_to: "{{ kubernetes_upgrade_node }}"
+          ansible.builtin.command: kubeadm version --output short
+          register: kubernetes_upgrade_node_kubeadm
+          changed_when: false
+          failed_when: kubernetes_upgrade_node_kubeadm.stdout != 'v' ~ kubernetes_hop_version
+
+        - name: Show upgrade plan
+          become: true
+          delegate_to: "{{ kubernetes_upgrade_node }}"
+          ansible.builtin.shell:
+            cmd: set -o pipefail && kubeadm upgrade plan 2>&1 | tee /root/kubeadm-upgrade-plan-v{{ kubernetes_hop_version }}.log
+            executable: /bin/bash
+          changed_when: false
+          when: kubernetes_upgrade_node_first_control_plane
+
+        - name: Upgrade control plane components
+          become: true
+          delegate_to: "{{ kubernetes_upgrade_node }}"
+          ansible.builtin.shell:
+            cmd: >-
+              set -o pipefail &&
+              kubeadm upgrade apply v{{ kubernetes_hop_version }} --yes --patches /root/kubeadm-patches 2>&1
+              | tee /root/kubeadm-upgrade-apply-v{{ kubernetes_hop_version }}.log
+            executable: /bin/bash
+          when: kubernetes_upgrade_node_first_control_plane
+
+        - name: Upgrade node configuration
+          become: true
+          delegate_to: "{{ kubernetes_upgrade_node }}"
+          ansible.builtin.shell:
+            cmd: >-
+              set -o pipefail &&
+              kubeadm upgrade node {{ '--patches /root/kubeadm-patches' if kubernetes_upgrade_node_control_plane else '' }} 2>&1
+              | tee /root/kubeadm-upgrade-node-v{{ kubernetes_hop_version }}.log
+            executable: /bin/bash
+          when: not kubernetes_upgrade_node_first_control_plane
+
+    - name: Drain {{ kubernetes_upgrade_node_name }}
+      become: true
+      ansible.builtin.command: >-
+        kubectl drain {{ kubernetes_upgrade_node_name }}
+        --ignore-daemonsets --delete-emptydir-data --timeout={{ kubernetes_drain_timeout }}
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+
+    - name: Install kubelet, kubectl and CRI-O
+      become: true
+      delegate_to: "{{ kubernetes_upgrade_node }}"
+      ansible.builtin.apt:
+        name:
+          - "kubelet={{ kubernetes_hop_kubeadm_package }}"
+          - "kubectl={{ kubernetes_hop_kubeadm_package }}"
+          - "cri-o={{ kubernetes_hop_cri_o_package }}"
+        state: present
+        allow_change_held_packages: true
+
+    - name: Hold Kubernetes packages
+      become: true
+      delegate_to: "{{ kubernetes_upgrade_node }}"
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - cri-o
+        - kubeadm
+        - kubectl
+        - kubelet
+
+    - name: Restart CRI-O
+      become: true
+      delegate_to: "{{ kubernetes_upgrade_node }}"
+      ansible.builtin.systemd_service:
+        name: crio
+        state: restarted
+        daemon_reload: true
+
+    - name: Restart kubelet
+      become: true
+      delegate_to: "{{ kubernetes_upgrade_node }}"
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: restarted
+        daemon_reload: true
+
+    - name: Wait for {{ kubernetes_upgrade_node_name }} to report v{{ kubernetes_hop_version }} and Ready
+      become: true
+      ansible.builtin.command: >-
+        kubectl get node {{ kubernetes_upgrade_node_name }}
+        --output jsonpath='{.status.nodeInfo.kubeletVersion} {.status.conditions[?(@.type=="Ready")].status}'
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      register: kubernetes_upgrade_node_status
+      until: kubernetes_upgrade_node_status.stdout == 'v' ~ kubernetes_hop_version ~ ' True'
+      retries: "{{ kubernetes_node_ready_retries }}"
+      delay: 10
+      changed_when: false
+
+    - name: Uncordon {{ kubernetes_upgrade_node_name }}
+      become: true
+      ansible.builtin.command: kubectl uncordon {{ kubernetes_upgrade_node_name }}
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      register: kubernetes_upgrade_node_uncordon
+      changed_when: "'already uncordoned' not in kubernetes_upgrade_node_uncordon.stdout"

@@ -1,0 +1,41 @@
+# Fresh node: install the target versions and hold them
+- name: Install Kubernetes packages
+  become: true
+  ansible.builtin.apt:
+    name:
+      - "cri-o={{ kubernetes_cri_o_version }}-*"
+      - "kubeadm={{ kubernetes_version }}-*"
+      - "kubectl={{ kubernetes_version }}-*"
+      - "kubelet={{ kubernetes_version }}-*"
+    state: present
+    allow_change_held_packages: true
+
+- name: Hold Kubernetes packages
+  become: true
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop:
+    - cri-o
+    - kubeadm
+    - kubectl
+    - kubelet
+
+- name: Enable and start CRI-O
+  become: true
+  ansible.builtin.systemd_service:
+    name: crio
+    enabled: true
+    state: started
+
+- name: Enable kubelet
+  become: true
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true
+    daemon_reload: true
+
+- name: Reboot
+  become: true
+  ansible.builtin.reboot:
+    reboot_timeout: 180 # 3 minutes

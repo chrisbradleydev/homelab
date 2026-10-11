@@ -1,5 +1,22 @@
 ---
-- name: Configure Nodes
-  ansible.builtin.include_tasks: configure-nodes.yaml
-# - name: Configure Control Plane
-#   ansible.builtin.include_tasks: configure-control-plane.yaml
+- name: Gather node state
+  ansible.builtin.include_tasks: facts.yaml
+
+- name: Prepare node
+  ansible.builtin.include_tasks: prerequisites.yaml
+
+- name: Install Kubernetes on new nodes
+  ansible.builtin.include_tasks: install.yaml
+  when: not kubernetes_node_joined
+
+- name: Configure control plane
+  ansible.builtin.include_tasks: control-plane.yaml
+  when: kubernetes_is_control_plane
+
+- name: Join worker nodes
+  ansible.builtin.include_tasks: join.yaml
+  when: kubernetes_is_worker
+
+- name: Upgrade cluster
+  ansible.builtin.include_tasks: upgrade.yaml
+  when: kubernetes_is_first_control_plane

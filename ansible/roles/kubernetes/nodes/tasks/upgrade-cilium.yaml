@@ -1,0 +1,77 @@
+# One Cilium minor version hop.
+# https://docs.cilium.io/en/stable/operations/upgrade/
+- name: Search Cilium chart versions
+  become: true
+  ansible.builtin.command: helm search repo cilium/cilium --versions --output json
+  register: kubernetes_cilium_search
+  changed_when: false
+
+# Intermediate hops use the newest patch release of that minor version. The
+# final hop uses the pinned version.
+- name: Set Cilium hop version
+  ansible.builtin.set_fact:
+    kubernetes_cilium_hop_version: >-
+      {{ kubernetes_cilium_version if kubernetes_cilium_hop_minor == kubernetes_cilium_minor
+         else (kubernetes_cilium_search.stdout | from_json | map(attribute='version')
+               | select('match', '^' ~ (kubernetes_cilium_hop_minor | regex_escape) ~ '\.[0-9]+$')
+               | community.general.version_sort | last) }}
+    kubernetes_cilium_from_minor: "{{ kubernetes_cilium_installed_version.split('.')[:2] | join('.') }}"
+
+- name: Upgrade Cilium {{ kubernetes_cilium_installed_version }} -> {{ kubernetes_cilium_hop_version }}
+  when: kubernetes_cilium_installed_version is version(kubernetes_cilium_hop_version, '<')
+  block:
+    # The pre-flight check pulls the new images and validates CRDs on every
+    # node before the agents restart.
+    - name: Render Cilium pre-flight manifest
+      become: true
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail &&
+          helm template cilium cilium/cilium --version {{ kubernetes_cilium_hop_version }}
+          --namespace kube-system
+          --set preflight.enabled=true --set agent=false --set operator.enabled=false
+          --set k8sServiceHost={{ kubernetes_control_plane_address }}
+          --set k8sServicePort={{ kubernetes_api_port }}
+          > /root/cilium-preflight.yaml
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Create Cilium pre-flight check
+      become: true
+      ansible.builtin.command: kubectl apply --filename /root/cilium-preflight.yaml
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+
+    - name: Wait for Cilium pre-flight check
+      become: true
+      ansible.builtin.command: >-
+        kubectl --namespace kube-system rollout status {{ item }}/cilium-pre-flight-check
+        --timeout={{ kubernetes_rollout_timeout }}
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      loop:
+        - daemonset
+        - deployment
+      changed_when: false
+
+    - name: Delete Cilium pre-flight check
+      become: true
+      ansible.builtin.command: kubectl delete --filename /root/cilium-preflight.yaml --ignore-not-found
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+
+    - name: Upgrade Cilium
+      become: true
+      ansible.builtin.command: >-
+        helm upgrade cilium cilium/cilium --version {{ kubernetes_cilium_hop_version }}
+        --namespace kube-system --values /root/cilium.yaml
+        --set upgradeCompatibility={{ kubernetes_cilium_from_minor }}
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+
+    - name: Wait for Cilium
+      ansible.builtin.include_tasks: cilium-wait.yaml
+
+    - name: Set installed Cilium version
+      ansible.builtin.set_fact:
+        kubernetes_cilium_installed_version: "{{ kubernetes_cilium_hop_version }}"

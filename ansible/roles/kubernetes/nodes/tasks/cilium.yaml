@@ -1,0 +1,105 @@
+# https://docs.cilium.io/en/stable/installation/k8s-install-helm/
+- name: Add Cilium Helm repository
+  become: true
+  ansible.builtin.command: helm repo add cilium https://helm.cilium.io/ --force-update
+  changed_when: false
+
+- name: Update Cilium Helm repository
+  become: true
+  ansible.builtin.command: helm repo update cilium
+  changed_when: false
+
+- name: Copy Cilium values
+  become: true
+  ansible.builtin.template:
+    src: cilium.yaml.j2
+    dest: /root/cilium.yaml
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Get installed Cilium release
+  become: true
+  ansible.builtin.command: helm list --namespace kube-system --filter '^cilium$' --output json
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_cilium_release
+  changed_when: false
+
+- name: Set installed Cilium version
+  ansible.builtin.set_fact:
+    kubernetes_cilium_installed_version: >-
+      {{ (kubernetes_cilium_release.stdout | from_json | map(attribute='chart') | first | default('cilium-'))
+         | regex_replace('^cilium-', '') }}
+
+- name: Install Cilium {{ kubernetes_cilium_version }}
+  when: kubernetes_cilium_installed_version == ''
+  block:
+    - name: Get node names
+      become: true
+      ansible.builtin.command: kubectl get nodes --output jsonpath='{.items[*].metadata.name}'
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      register: kubernetes_node_names
+      changed_when: false
+
+    # Keep pods off the nodes until the Cilium agent is ready. The operator
+    # removes the taint once the agent on that node is up.
+    - name: Taint nodes until Cilium is ready
+      become: true
+      ansible.builtin.command: kubectl taint nodes {{ item }} node.cilium.io/agent-not-ready=true:NoSchedule --overwrite
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      loop: "{{ kubernetes_node_names.stdout.split() }}"
+
+    - name: Install Cilium
+      become: true
+      ansible.builtin.command: >-
+        helm install cilium cilium/cilium --version {{ kubernetes_cilium_version }}
+        --namespace kube-system --values /root/cilium.yaml
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+
+    - name: Wait for Cilium
+      ansible.builtin.include_tasks: cilium-wait.yaml
+
+    - name: Set installed Cilium version
+      ansible.builtin.set_fact:
+        kubernetes_cilium_installed_version: "{{ kubernetes_cilium_version }}"
+
+# upgrade-cilium.yaml applies cilium.yaml.j2 when the Cilium version changes.
+# When the version already matches, these tasks compare the release's values
+# with the template and run helm upgrade if they differ. upgrade-cilium.yaml
+# sets upgradeCompatibility, not the template, so the comparison skips it and
+# the upgrade keeps the current value.
+- name: Get Cilium release values
+  become: true
+  ansible.builtin.command: helm get values cilium --namespace kube-system --output json
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_cilium_values
+  changed_when: false
+  when: kubernetes_cilium_installed_version == kubernetes_cilium_version
+
+- name: Apply changed Cilium values
+  when:
+    - kubernetes_cilium_installed_version == kubernetes_cilium_version
+    - kubernetes_cilium_values_release != kubernetes_cilium_values_template
+  vars:
+    kubernetes_cilium_values_all: "{{ kubernetes_cilium_values.stdout | from_json | default({}, true) }}"
+    kubernetes_cilium_values_release: >-
+      {{ kubernetes_cilium_values_all | dict2items | rejectattr('key', 'eq', 'upgradeCompatibility') | items2dict }}
+    kubernetes_cilium_values_template: "{{ lookup('ansible.builtin.template', 'cilium.yaml.j2') | from_yaml }}"
+  block:
+    - name: Upgrade Cilium {{ kubernetes_cilium_version }} with changed values
+      become: true
+      ansible.builtin.command: >-
+        helm upgrade cilium cilium/cilium --version {{ kubernetes_cilium_version }}
+        --namespace kube-system --values /root/cilium.yaml
+        {{ ('--set upgradeCompatibility=' ~ kubernetes_cilium_values_all.upgradeCompatibility)
+           if kubernetes_cilium_values_all.upgradeCompatibility is defined else '' }}
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+
+    - name: Wait for Cilium
+      ansible.builtin.include_tasks: cilium-wait.yaml

@@ -1,0 +1,56 @@
+# https://kubernetes.io/docs/reference/config-api/kubeadm-config.v1beta4/
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: InitConfiguration
+nodeRegistration:
+  criSocket: "unix:///run/crio/crio.sock"
+  imagePullPolicy: "IfNotPresent"
+  imagePullSerial: true
+# Set memory requests on the control plane static pods
+patches:
+  directory: /root/kubeadm-patches
+---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
+networking:
+  serviceSubnet: "{{ kubernetes_service_subnet }}"
+  podSubnet: "{{ kubernetes_pod_subnet }}"
+  dnsDomain: "{{ kubernetes_dns_domain }}"
+kubernetesVersion: "v{{ kubernetes_version }}"
+controlPlaneEndpoint: "{{ kubernetes_control_plane_endpoint }}"
+apiServer:
+  extraArgs:
+    - name: authorization-mode
+      value: Node,RBAC
+# Cilium replaces kube-proxy, see tasks/kube-proxy.yaml
+proxy:
+  disabled: true
+---
+# https://kubernetes.io/docs/reference/config-api/kube-proxy-config.v1alpha1/
+# Unused while proxy.disabled is true. Declares the mode kube-proxy would run
+# in if the addon were enabled again.
+apiVersion: kubeproxy.config.k8s.io/v1alpha1
+kind: KubeProxyConfiguration
+mode: "{{ kubernetes_kube_proxy_mode }}"
+---
+# https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+cgroupDriver: systemd
+eventBurst: 300
+eventRecordQPS: 100
+kubeAPIBurst: 300
+kubeAPIQPS: 100
+maxPods: 110
+# Reserve headroom for the OS and for kubelet/CRI-O. The control plane is
+# deliberately schedulable (see tasks/control-plane.yaml)
+systemReserved:
+  cpu: 200m
+  memory: 300Mi
+kubeReserved:
+  cpu: 200m
+  memory: 300Mi
+evictionHard:
+  memory.available: "200Mi"
+  nodefs.available: "10%"
+enforceNodeAllocatable:
+  - pods

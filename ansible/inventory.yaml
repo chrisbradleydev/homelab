@@ -64,6 +64,16 @@ home:
     localhost:
       ansible_connection: local
 
+kubernetes:
+  children:
+    kubernetes_control_plane:
+      hosts:
+        kube1.localdomain:
+    kubernetes_workers:
+      hosts:
+        kube2.localdomain:
+        kube3.localdomain:
+
 all:
   vars:
     ansible_python_interpreter: /usr/bin/python3

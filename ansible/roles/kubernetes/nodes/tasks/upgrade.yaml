@@ -1,0 +1,104 @@
+# Runs on the first control plane node and drives every node in the cluster.
+# https://kubernetes.io/docs/tasks/administer-cluster/cluster-upgrade/
+# https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/
+- name: Get kubelet versions
+  become: true
+  ansible.builtin.command: kubectl get nodes --output jsonpath='{.items[*].status.nodeInfo.kubeletVersion}'
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_kubelet_versions
+  changed_when: false
+
+- name: Get API server version
+  become: true
+  ansible.builtin.command: kubectl version --output json
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_api_version
+  changed_when: false
+
+- name: Get CRI-O versions
+  become: true
+  ansible.builtin.command: kubectl get nodes --output jsonpath='{.items[*].status.nodeInfo.containerRuntimeVersion}'
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_runtime_versions
+  changed_when: false
+
+# The cluster version is the oldest component version, so a partially
+# upgraded cluster resumes at the right hop.
+- name: Set current versions
+  ansible.builtin.set_fact:
+    kubernetes_current_version: >-
+      {{ (kubernetes_kubelet_versions.stdout.split() + [(kubernetes_api_version.stdout | from_json).serverVersion.gitVersion])
+         | map('regex_replace', '^v', '') | community.general.version_sort | first }}
+    kubernetes_current_cri_o_versions: "{{ kubernetes_runtime_versions.stdout.split() | map('regex_replace', '^cri-o://', '') | list }}"
+
+- name: Set current minor versions
+  ansible.builtin.set_fact:
+    kubernetes_current_minor: "{{ kubernetes_current_version.split('.')[:2] | join('.') }}"
+    kubernetes_cilium_installed_minor: "{{ kubernetes_cilium_installed_version.split('.')[:2] | join('.') }}"
+
+- name: Refuse to downgrade
+  ansible.builtin.assert:
+    that:
+      - kubernetes_current_version is version(kubernetes_version, '<=')
+      - kubernetes_cilium_installed_version is version(kubernetes_cilium_version, '<=')
+      - kubernetes_current_cri_o_versions | select('version', kubernetes_cri_o_version, '>') | list | length == 0
+    fail_msg: >-
+      Cluster runs Kubernetes {{ kubernetes_current_version }}, Cilium {{ kubernetes_cilium_installed_version }}
+      and CRI-O {{ kubernetes_current_cri_o_versions | unique | join(', ') }}, which is newer than the configured
+      Kubernetes {{ kubernetes_version }} / Cilium {{ kubernetes_cilium_version }} / CRI-O {{ kubernetes_cri_o_version }}
+
+# Skipping minor versions is unsupported by both Cilium and kubeadm, so the
+# path lists every minor version between the current one and the target.
+# A patch release of Kubernetes, CRI-O, or both is a single hop within the
+# current minor version.
+- name: Set upgrade path
+  ansible.builtin.set_fact:
+    kubernetes_cilium_hops: >-
+      {{ range(kubernetes_cilium_installed_minor.split('.')[1] | int + 1, kubernetes_cilium_minor.split('.')[1] | int + 1)
+         | map('regex_replace', '^', '1.') | list
+         or ([kubernetes_cilium_minor] if kubernetes_cilium_installed_version != kubernetes_cilium_version else []) }}
+    kubernetes_hops: >-
+      {{ range(kubernetes_current_minor.split('.')[1] | int + 1, kubernetes_minor.split('.')[1] | int + 1)
+         | map('regex_replace', '^', '1.') | list
+         or ([kubernetes_minor] if kubernetes_current_version != kubernetes_version
+             or kubernetes_current_cri_o_versions | unique != [kubernetes_cri_o_version] else []) }}
+
+- name: Show upgrade path
+  ansible.builtin.debug:
+    msg:
+      - "Cilium {{ kubernetes_cilium_installed_version }} -> {{ kubernetes_cilium_version }} via {{ kubernetes_cilium_hops | join(', ') or 'no change' }}"
+      - "Kubernetes {{ kubernetes_current_version }} -> {{ kubernetes_version }} via {{ kubernetes_hops | join(', ') or 'no change' }}"
+      - "CRI-O {{ kubernetes_current_cri_o_versions | unique | join(', ') }} -> {{ kubernetes_cri_o_version }}"
+
+- name: Upgrade Cilium one minor version at a time
+  ansible.builtin.include_tasks: upgrade-cilium.yaml
+  loop: "{{ kubernetes_cilium_hops }}"
+  loop_control:
+    loop_var: kubernetes_cilium_hop_minor
+
+- name: Upgrade Kubernetes one minor version at a time
+  ansible.builtin.include_tasks: upgrade-hop.yaml
+  loop: "{{ kubernetes_hops }}"
+  loop_control:
+    loop_var: kubernetes_hop_minor
+
+- name: Verify every node runs v{{ kubernetes_version }}
+  become: true
+  ansible.builtin.command: kubectl get nodes --output jsonpath='{.items[*].status.nodeInfo.kubeletVersion}'
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_final_versions
+  changed_when: false
+  failed_when: kubernetes_final_versions.stdout.split() | unique != ['v' ~ kubernetes_version]
+
+- name: Verify every node runs CRI-O {{ kubernetes_cri_o_version }}
+  become: true
+  ansible.builtin.command: kubectl get nodes --output jsonpath='{.items[*].status.nodeInfo.containerRuntimeVersion}'
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_final_runtime_versions
+  changed_when: false
+  failed_when: kubernetes_final_runtime_versions.stdout.split() | unique != ['cri-o://' ~ kubernetes_cri_o_version]
