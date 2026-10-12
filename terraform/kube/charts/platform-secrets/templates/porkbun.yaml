@@ -1,0 +1,32 @@
+# The Porkbun DNS-01 webhook reads this Secret to create the TXT record for
+# each DNS-01 challenge. The api-key and secret-key values live in OpenBao at
+# kv/platform/cert-manager/porkbun.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: porkbun-api-credentials
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "platform-secrets.labels" . | nindent 4 }}
+spec:
+  # External Secrets reads OpenBao again every hour. If OpenBao is down, the
+  # Secret keeps its last synced value.
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: openbao
+  target:
+    name: porkbun-api-credentials
+    # Deleting this ExternalSecret deletes the Secret
+    creationPolicy: Owner
+    # Deleting the key in OpenBao leaves the Secret in place
+    deletionPolicy: Retain
+  data:
+    - secretKey: api-key
+      remoteRef:
+        key: platform/cert-manager/porkbun
+        property: api-key
+    - secretKey: secret-key
+      remoteRef:
+        key: platform/cert-manager/porkbun
+        property: secret-key

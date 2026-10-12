@@ -1,0 +1,7 @@
+# openbao-active routes only to the active server. The openbao Service
+# publishes not-ready addresses, so it can route to a sealed pod.
+openbaoServer: https://openbao-active.openbao.svc:8200
+
+# Changes to any file in this chart change this value, so Terraform upgrades
+# the release. Set by external-secrets.tf.
+checksum: ""
