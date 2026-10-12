@@ -44,11 +44,17 @@ module "pg_operator_namespace" {
 }
 
 # Products. Each product namespace holds the app, its PostgreSQL cluster and
-# its Valkey, so their Secrets never cross namespaces. Move pod_security to
-# restricted once `kubectl label --dry-run=server` shows no warnings.
+# its Valkey, so their Secrets never cross namespaces. The module enforces
+# baseline by default. Before you set pod_security to restricted, check that
+# this command prints no warnings:
+#   kubectl label --dry-run=server --overwrite ns <name> \
+#     pod-security.kubernetes.io/enforce=restricted
 module "gitea_namespace" {
-  source            = "./modules/product-namespace"
-  name              = "gitea"
+  source = "./modules/product-namespace"
+  name   = "gitea"
+  # Gitea, Valkey, the PostgreSQL pods and jobs, and the backup pruner all
+  # pass restricted
+  pod_security      = "restricted"
   gateway           = true
   trust_internal_ca = true
   openbao_reader    = true
