@@ -34,11 +34,10 @@ provisioner:
     resources:
       requests:
         memory: 32Mi
+# kubernetes_secret_v1.csi-cephfs-secret in ceph.tf writes this Secret
 secret:
   name: csi-cephfs-secret
-  userID: "${user-id}"
-  userKey: "${user-key}"
-  create: true
+  create: false
 storageClass:
   name: ceph-rbd-sc
   pool: kubernetes-pool
@@ -58,3 +57,10 @@ storageClass:
   provisionerSecretNamespace: ceph-csi-rbd
   reclaimPolicy: Delete
   create: true
+volumeSnapshotClass:
+  create: true
+  name: ceph-rbd
+  clusterID: "${cluster-id}"
+  snapshotterSecret: csi-cephfs-secret
+  snapshotterSecretNamespace: ceph-csi-rbd
+  deletionPolicy: Delete

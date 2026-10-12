@@ -1,0 +1,19 @@
+# The empty endpointSelector picks every pod in the namespace. One empty
+# ingress rule turns on default deny without allowing any traffic. Each
+# product adds its own allow policies.
+# Cilium still allows kubelet probes, which come from the host identity.
+# https://docs.cilium.io/en/stable/security/policy/language/#ingress-default-deny
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: namespace-default-deny
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: touchgrass-platform
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  endpointSelector: {}
+  ingress:
+    - {}

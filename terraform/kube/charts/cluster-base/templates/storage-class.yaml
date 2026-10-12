@@ -1,0 +1,27 @@
+# Same as ceph-rbd-sc, except deleting a PVC keeps the RBD image. Use it for
+# data you can't recreate: databases, Valkey data and Git repositories.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ceph-rbd-retain
+  labels:
+    {{- include "cluster-base.labels" . | nindent 4 }}
+provisioner: rbd.csi.ceph.com
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+volumeBindingMode: Immediate
+mountOptions:
+  - discard
+parameters:
+  clusterID: {{ required "cephClusterID is required" .Values.cephClusterID | quote }}
+  pool: kubernetes-pool
+  imageFeatures: layering
+  csi.storage.k8s.io/fstype: ext4
+  csi.storage.k8s.io/provisioner-secret-name: csi-cephfs-secret
+  csi.storage.k8s.io/provisioner-secret-namespace: ceph-csi-rbd
+  csi.storage.k8s.io/controller-expand-secret-name: csi-cephfs-secret
+  csi.storage.k8s.io/controller-expand-secret-namespace: ceph-csi-rbd
+  csi.storage.k8s.io/controller-publish-secret-name: csi-cephfs-secret
+  csi.storage.k8s.io/controller-publish-secret-namespace: ceph-csi-rbd
+  csi.storage.k8s.io/node-stage-secret-name: csi-cephfs-secret
+  csi.storage.k8s.io/node-stage-secret-namespace: ceph-csi-rbd

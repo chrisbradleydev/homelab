@@ -1,0 +1,25 @@
+# Cilium hands out LoadBalancer IPs from this pool and answers ARP for them
+# on eth0.
+# https://docs.cilium.io/en/stable/network/lb-ipam/
+# https://docs.cilium.io/en/stable/network/l2-announcements/
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: lan
+  labels:
+    {{- include "cluster-base.labels" . | nindent 4 }}
+spec:
+  blocks:
+    - start: {{ .Values.loadBalancerPool.start | quote }}
+      stop: {{ .Values.loadBalancerPool.stop | quote }}
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: lan
+  labels:
+    {{- include "cluster-base.labels" . | nindent 4 }}
+spec:
+  interfaces:
+    - ^eth0$
+  loadBalancerIPs: true

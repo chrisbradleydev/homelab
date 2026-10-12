@@ -1,0 +1,3 @@
+creation_rules:
+  - path_regex: secrets/.*\.enc\.yaml$
+    pgp: B4A1F58E3A0ADDB07AF1178F629810C9E11DAEE0

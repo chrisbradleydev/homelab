@@ -1,0 +1,22 @@
+# Both sit below system-cluster-critical (2000000000). When a node runs out
+# of room, the scheduler preempts these pods before Kubernetes and Cilium
+# components.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: platform-critical
+  labels:
+    {{- include "cluster-base.labels" . | nindent 4 }}
+value: 1000000
+globalDefault: false
+description: Shared platform services such as cert-manager, OpenBao and External Secrets
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: data-critical
+  labels:
+    {{- include "cluster-base.labels" . | nindent 4 }}
+value: 900000
+globalDefault: false
+description: Stateful product services such as PostgreSQL, PgBouncer, Valkey and Gitea
