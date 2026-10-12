@@ -5,6 +5,10 @@ kubernetes_version: "1.37.1" # kubeadm, kubelet and kubectl
 kubernetes_cri_o_version: "1.37.2"
 kubernetes_cilium_version: "1.20.2"
 kubernetes_helm_version: "4.3.0"
+# Gateway API CRDs that Cilium serves. Change this together with
+# kubernetes_cilium_version, to the version listed here:
+# https://docs.cilium.io/en/v1.20/network/servicemesh/gateway-api/gateway-api/
+kubernetes_gateway_api_version: "1.6.1"
 
 # Cluster networking
 kubernetes_api_port: 6443
@@ -19,14 +23,28 @@ kubernetes_dns_domain: "cluster.local"
 # addon is ever enabled again.
 kubernetes_kube_proxy_mode: "nftables"
 
+# Kubelet reservations, sized for nodes with 4 vCPU and 16 GiB of memory
+kubernetes_system_reserved_cpu: 200m
+kubernetes_system_reserved_memory: 512Mi
+kubernetes_kube_reserved_cpu: 300m
+kubernetes_kube_reserved_memory: 1Gi
+kubernetes_eviction_memory_available: 500Mi
+kubernetes_eviction_nodefs_available: "10%"
+
+# Daily etcd snapshots on the control plane
+kubernetes_etcd_backup_dir: /var/backups/etcd
+kubernetes_etcd_backup_keep_days: 7
+
 # Timeouts
 kubernetes_drain_timeout: "300s"
 kubernetes_rollout_timeout: "600s"
 kubernetes_node_ready_retries: 60 # x 10 seconds
+kubernetes_pdb_wait_retries: 60 # x 10 seconds
 
 # Paths on the control plane
 kubernetes_kubeconfig: /etc/kubernetes/admin.conf
 kubernetes_backup_dir: /root/kubernetes-upgrade-backups
+kubernetes_encryption_config: /etc/kubernetes/enc/encryption-config.yaml
 
 # Derived values, do not override
 kubernetes_minor: "{{ kubernetes_version.split('.')[:2] | join('.') }}"

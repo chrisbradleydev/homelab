@@ -1,0 +1,11 @@
+# systemd user unit. Install steps: ansible/roles/kubernetes/nodes/README.md
+[Unit]
+Description=Copy an encrypted etcd snapshot from the control plane daily
+
+[Timer]
+# An hour after the snapshot on the control plane (etcd-backup.timer)
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

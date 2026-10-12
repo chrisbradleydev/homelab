@@ -1,0 +1,9 @@
+# systemd user unit. Install steps: ansible/roles/kubernetes/nodes/README.md
+[Unit]
+Description=Copy an encrypted etcd snapshot from the control plane
+
+[Service]
+Type=oneshot
+# gpg comes from Homebrew, which isn't on the default user-service PATH
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/Repos/github.com/chrisbradleydev/homelab/scripts/etcd-backup-pull.sh

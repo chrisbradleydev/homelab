@@ -1,0 +1,39 @@
+# Running nodes keep the kubelet configuration they joined with. These tasks
+# push the reservations from kubeadm-config.yaml.j2 to them, one node at a time.
+# https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-reconfigure/#reflecting-the-kubelet-changes
+- name: Set the kubelet reservations
+  ansible.builtin.set_fact:
+    kubernetes_kubelet_reserved:
+      systemReserved:
+        cpu: "{{ kubernetes_system_reserved_cpu }}"
+        memory: "{{ kubernetes_system_reserved_memory }}"
+      kubeReserved:
+        cpu: "{{ kubernetes_kube_reserved_cpu }}"
+        memory: "{{ kubernetes_kube_reserved_memory }}"
+      evictionHard:
+        memory.available: "{{ kubernetes_eviction_memory_available }}"
+        nodefs.available: "{{ kubernetes_eviction_nodefs_available }}"
+
+- name: Get the kubelet-config ConfigMap
+  become: true
+  ansible.builtin.command: kubectl --namespace kube-system get configmap kubelet-config --output jsonpath='{.data.kubelet}'
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_kubelet_configmap
+  changed_when: false
+
+# kubeadm join and kubeadm upgrade node read the kubelet configuration from
+# the kubelet-config ConfigMap
+- name: Upload the kubelet configuration
+  become: true
+  ansible.builtin.command: kubeadm init phase upload-config kubelet --config /root/kubeadm-config.yaml
+  when: >-
+    kubernetes_kubelet_configmap.stdout | from_yaml
+    | dict2items | selectattr('key', 'in', kubernetes_kubelet_reserved.keys() | list) | items2dict
+    != kubernetes_kubelet_reserved
+
+- name: Apply the kubelet configuration to each node
+  ansible.builtin.include_tasks: kubelet-reserved-node.yaml
+  loop: "{{ groups['kubernetes'] }}"
+  loop_control:
+    loop_var: kubernetes_reserved_node

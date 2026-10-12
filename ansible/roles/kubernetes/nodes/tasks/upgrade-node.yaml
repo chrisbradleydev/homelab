@@ -153,3 +153,18 @@
         KUBECONFIG: "{{ kubernetes_kubeconfig }}"
       register: kubernetes_upgrade_node_uncordon
       changed_when: "'already uncordoned' not in kubernetes_upgrade_node_uncordon.stdout"
+
+    # If a pod that moved off this node isn't Ready again within the drain
+    # timeout, the next drain fails
+    - name: Wait until no PodDisruptionBudget blocks the next drain
+      become: true
+      ansible.builtin.command: >-
+        kubectl get pdb --all-namespaces
+        --output jsonpath='{range .items[?(@.status.disruptionsAllowed==0)]}{.metadata.namespace}/{.metadata.name} {end}'
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      register: kubernetes_blocked_pdbs
+      until: kubernetes_blocked_pdbs.stdout | trim == ''
+      retries: "{{ kubernetes_pdb_wait_retries }}"
+      delay: 10
+      changed_when: false

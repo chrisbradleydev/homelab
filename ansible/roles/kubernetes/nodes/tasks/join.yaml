@@ -24,6 +24,17 @@
   register: kubernetes_worker_label
   changed_when: "'not labeled' not in kubernetes_worker_label.stdout"
 
+- name: Label worker node with its failure domain
+  become: true
+  delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"
+  ansible.builtin.command: >-
+    kubectl label node {{ ansible_facts['hostname'] }}
+    topology.kubernetes.io/zone={{ kubernetes_zone }} --overwrite
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_zone_label
+  changed_when: "'not labeled' not in kubernetes_zone_label.stdout"
+
 - name: Wait for the node to become Ready
   become: true
   delegate_to: "{{ groups['kubernetes_control_plane'][0] }}"

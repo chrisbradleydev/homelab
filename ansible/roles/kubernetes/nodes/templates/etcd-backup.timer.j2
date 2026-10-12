@@ -1,0 +1,11 @@
+# Managed by Ansible (roles/kubernetes/nodes)
+[Unit]
+Description=Snapshot etcd daily
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

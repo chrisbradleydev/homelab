@@ -1,0 +1,40 @@
+# Apply the kubelet reservations to one node. kubectl runs on the first
+# control plane node. Every other task runs on the node itself.
+- name: Set node name
+  ansible.builtin.set_fact:
+    kubernetes_reserved_node_name: "{{ hostvars[kubernetes_reserved_node]['ansible_facts']['hostname'] }}"
+
+- name: Read the kubelet configuration on {{ kubernetes_reserved_node_name }}
+  become: true
+  delegate_to: "{{ kubernetes_reserved_node }}"
+  ansible.builtin.slurp:
+    src: /var/lib/kubelet/config.yaml
+  register: kubernetes_reserved_node_config
+
+- name: Update the kubelet configuration on {{ kubernetes_reserved_node_name }}
+  when: >-
+    kubernetes_reserved_node_config.content | b64decode | from_yaml
+    | dict2items | selectattr('key', 'in', kubernetes_kubelet_reserved.keys() | list) | items2dict
+    != kubernetes_kubelet_reserved
+  block:
+    - name: Write the kubelet configuration from the ConfigMap
+      become: true
+      delegate_to: "{{ kubernetes_reserved_node }}"
+      ansible.builtin.command: kubeadm upgrade node phase kubelet-config
+
+    # Running pods keep running while the kubelet restarts
+    - name: Restart kubelet
+      become: true
+      delegate_to: "{{ kubernetes_reserved_node }}"
+      ansible.builtin.systemd_service:
+        name: kubelet
+        state: restarted
+
+    - name: Wait for {{ kubernetes_reserved_node_name }} to be Ready
+      become: true
+      ansible.builtin.command: >-
+        kubectl wait --for=condition=Ready node/{{ kubernetes_reserved_node_name }}
+        --timeout={{ kubernetes_rollout_timeout }}
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      changed_when: false

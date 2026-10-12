@@ -1,0 +1,150 @@
+# Encrypt Secrets at rest in etcd.
+# https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/
+#
+# The control plane generates the key, and the key leaves the node only inside
+# backups. Without the key file, nobody can read the Secrets in an etcd
+# snapshot. scripts/etcd-backup-pull.sh copies the key and the snapshots to
+# separate directories.
+- name: Create the encryption configuration
+  become: true
+  ansible.builtin.shell:
+    cmd: |
+      set -o errexit -o pipefail
+      umask 077
+      mkdir -p {{ kubernetes_encryption_config | dirname }}
+      key=$(head -c 32 /dev/urandom | base64)
+      cat > {{ kubernetes_encryption_config }} <<EOF
+      apiVersion: apiserver.config.k8s.io/v1
+      kind: EncryptionConfiguration
+      resources:
+        - resources:
+            - secrets
+          providers:
+            - secretbox:
+                keys:
+                  - name: key1
+                    secret: ${key}
+            - identity: {}
+      EOF
+    creates: "{{ kubernetes_encryption_config }}"
+    executable: /bin/bash
+
+# A new control plane gets --encryption-provider-config from
+# kubeadm-config.yaml.j2 during kubeadm init. A running control plane gets a
+# regenerated API server manifest.
+- name: Turn on encryption for the running API server
+  when: kubernetes_control_plane_initialized
+  block:
+    - name: Check whether the API server uses the encryption configuration
+      become: true
+      ansible.builtin.command: grep --quiet -- --encryption-provider-config= /etc/kubernetes/manifests/kube-apiserver.yaml
+      register: kubernetes_apiserver_encryption
+      changed_when: false
+      failed_when: kubernetes_apiserver_encryption.rc not in [0, 1]
+
+    - name: Regenerate the API server manifest
+      when: kubernetes_apiserver_encryption.rc == 1
+      block:
+        - name: Create backup directory
+          become: true
+          ansible.builtin.file:
+            path: "{{ kubernetes_backup_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        # The copy goes outside /etc/kubernetes/manifests, because the kubelet
+        # runs every file in that directory
+        - name: Back up the API server manifest
+          become: true
+          ansible.builtin.copy:
+            src: /etc/kubernetes/manifests/kube-apiserver.yaml
+            dest: "{{ kubernetes_backup_dir }}/kube-apiserver.yaml.pre-encryption"
+            remote_src: true
+            owner: root
+            group: root
+            mode: "0600"
+
+        # kubeadm refuses --patches together with --config. The config file
+        # sets the patches directory.
+        - name: Write the API server manifest with the encryption configuration
+          become: true
+          ansible.builtin.command: kubeadm init phase control-plane apiserver --config /root/kubeadm-config.yaml
+
+        - name: Wait for the API server to run with the encryption configuration
+          become: true
+          ansible.builtin.command: >-
+            kubectl --namespace kube-system get pod kube-apiserver-{{ ansible_facts['hostname'] }}
+            --output jsonpath='{.spec.containers[0].command} {.status.conditions[?(@.type=="Ready")].status}'
+          environment:
+            KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+          register: kubernetes_apiserver_pod
+          until: >-
+            kubernetes_apiserver_pod.rc == 0
+            and '--encryption-provider-config=' in kubernetes_apiserver_pod.stdout
+            and kubernetes_apiserver_pod.stdout is search(' True$')
+          retries: 30
+          delay: 10
+          changed_when: false
+
+        # kubeadm upgrade reads the cluster configuration from the
+        # kubeadm-config ConfigMap
+        - name: Upload the kubeadm cluster configuration
+          become: true
+          ansible.builtin.command: kubeadm init phase upload-config kubeadm --config /root/kubeadm-config.yaml
+
+    # etcd keeps existing Secrets in plain text until something writes them
+    # again
+    - name: Read a Secret from etcd
+      become: true
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail &&
+          name=$(kubectl --namespace kube-system get secrets --output jsonpath='{.items[0].metadata.name}') &&
+          kubectl --namespace kube-system exec etcd-{{ ansible_facts['hostname'] }} --
+          etcdctl --endpoints=https://127.0.0.1:2379
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt
+          --cert=/etc/kubernetes/pki/etcd/server.crt
+          --key=/etc/kubernetes/pki/etcd/server.key
+          get /registry/secrets/kube-system/"$name" --print-value-only
+          | tr -cd '[:print:]' | cut -c1-25
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      register: kubernetes_secret_prefix
+      changed_when: false
+
+    - name: Rewrite every Secret so etcd stores it encrypted
+      become: true
+      ansible.builtin.shell:
+        cmd: set -o pipefail && kubectl get secrets --all-namespaces --output json | kubectl replace --filename -
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      register: kubernetes_secret_rewrite
+      until: kubernetes_secret_rewrite.rc == 0
+      retries: 5
+      delay: 10
+      when: kubernetes_secret_prefix.stdout != 'k8s:enc:secretbox:v1:key1'
+      no_log: true
+
+    - name: Verify etcd stores Secrets encrypted
+      become: true
+      ansible.builtin.shell:
+        cmd: >-
+          set -o pipefail &&
+          name=$(kubectl --namespace kube-system get secrets --output jsonpath='{.items[0].metadata.name}') &&
+          kubectl --namespace kube-system exec etcd-{{ ansible_facts['hostname'] }} --
+          etcdctl --endpoints=https://127.0.0.1:2379
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt
+          --cert=/etc/kubernetes/pki/etcd/server.crt
+          --key=/etc/kubernetes/pki/etcd/server.key
+          get /registry/secrets/kube-system/"$name" --print-value-only
+          | tr -cd '[:print:]' | cut -c1-25
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      register: kubernetes_secret_check
+      changed_when: false
+      failed_when: kubernetes_secret_check.stdout != 'k8s:enc:secretbox:v1:key1'

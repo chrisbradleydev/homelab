@@ -36,10 +36,44 @@
       net.ipv4.ip_forward                 = 1
   register: kubernetes_sysctl
 
+# Valkey needs overcommit to fork for persistence. Controllers that watch
+# files run out of inotify instances at the default limit of 128.
+- name: Set workload sysctl params
+  become: true
+  ansible.builtin.copy:
+    owner: root
+    group: root
+    mode: "0644"
+    dest: /etc/sysctl.d/90-kubernetes.conf
+    content: |
+      vm.overcommit_memory            = 1
+      fs.inotify.max_user_instances   = 8192
+      fs.inotify.max_user_watches     = 524288
+  register: kubernetes_sysctl_workloads
+
 - name: Apply sysctl params without reboot
   become: true
   ansible.builtin.command: sysctl --system
-  when: kubernetes_sysctl is changed
+  when: kubernetes_sysctl is changed or kubernetes_sysctl_workloads is changed
+
+# PostgreSQL and Valkey both warn about latency spikes when transparent huge
+# pages are set to always
+- name: Set transparent huge pages to madvise
+  become: true
+  ansible.builtin.copy:
+    owner: root
+    group: root
+    mode: "0644"
+    dest: /etc/tmpfiles.d/thp.conf
+    content: |
+      w /sys/kernel/mm/transparent_hugepage/enabled - - - - madvise
+      w /sys/kernel/mm/transparent_hugepage/defrag - - - - madvise
+  register: kubernetes_thp
+
+- name: Apply transparent huge page settings without reboot
+  become: true
+  ansible.builtin.command: systemd-tmpfiles --create /etc/tmpfiles.d/thp.conf
+  when: kubernetes_thp is changed
 
 - name: Disable swap
   become: true

@@ -1,0 +1,8 @@
+# Managed by Ansible (roles/kubernetes/nodes)
+[Unit]
+Description=Snapshot etcd
+After=kubelet.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/etcd-backup

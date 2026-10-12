@@ -1,0 +1,23 @@
+# Cilium serves Gateway API but doesn't ship the CRDs. The CRDs have to exist
+# before the Cilium operator starts, or the operator doesn't register the
+# cilium GatewayClass.
+# https://gateway-api.sigs.k8s.io/guides/getting-started/#installing-gateway-api
+- name: Get installed Gateway API version
+  become: true
+  ansible.builtin.command: >-
+    kubectl get crd gateways.gateway.networking.k8s.io
+    --output jsonpath='{.metadata.annotations.gateway\.networking\.k8s\.io/bundle-version}'
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_gateway_api_installed
+  changed_when: false
+  failed_when: kubernetes_gateway_api_installed.rc != 0 and 'NotFound' not in kubernetes_gateway_api_installed.stderr
+
+- name: Install Gateway API v{{ kubernetes_gateway_api_version }} CRDs
+  become: true
+  ansible.builtin.command: >-
+    kubectl apply --server-side
+    --filename https://github.com/kubernetes-sigs/gateway-api/releases/download/v{{ kubernetes_gateway_api_version }}/standard-install.yaml
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  when: kubernetes_gateway_api_installed.stdout != 'v' ~ kubernetes_gateway_api_version

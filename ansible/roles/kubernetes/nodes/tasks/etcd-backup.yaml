@@ -1,0 +1,31 @@
+# Daily etcd snapshots on the control plane. tasks/backup.yaml still takes its
+# own snapshot before every upgrade hop.
+- name: Install the etcd backup script
+  become: true
+  ansible.builtin.template:
+    src: etcd-backup.sh.j2
+    dest: /usr/local/sbin/etcd-backup
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install the etcd backup units
+  become: true
+  ansible.builtin.template:
+    src: "etcd-backup.{{ item }}.j2"
+    dest: "/etc/systemd/system/etcd-backup.{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - service
+    - timer
+  register: kubernetes_etcd_backup_units
+
+- name: Enable the etcd backup timer
+  become: true
+  ansible.builtin.systemd_service:
+    name: etcd-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ kubernetes_etcd_backup_units is changed }}"

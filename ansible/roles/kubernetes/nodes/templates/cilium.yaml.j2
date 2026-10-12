@@ -33,15 +33,33 @@ k8sServicePort: "{{ kubernetes_api_port }}"
 # https://docs.cilium.io/en/stable/network/kubernetes/kubeproxy-free/
 kubeProxyReplacement: "true"
 
+# Interface for the datapath and L2 announcements. Pinned so auto-detection
+# never picks up a NIC added later.
+devices: eth0
+
+# Serve Gateway API. tasks/gateway-api.yaml installs the CRDs first.
+# https://docs.cilium.io/en/stable/network/servicemesh/gateway-api/gateway-api/
+gatewayAPI:
+  enabled: true
+
+# Each announced LoadBalancer Service renews a lease through the API server.
+# https://docs.cilium.io/en/stable/network/l2-announcements/#sizing-client-rate-limit
+k8sClientRateLimit:
+  qps: 20
+  burst: 40
+
 l2announcements:
-  # Enable L2 announcements
-  enabled: false
+  # Answer ARP for LoadBalancer IPs on the node LAN
+  enabled: true
 
 operator:
   # Memory request for cilium-operator
   resources:
     requests:
       memory: 64Mi
+  # Restart the operator when its configuration changes, so the operator
+  # registers the cilium GatewayClass
+  rollOutPods: true
 
 # Memory request for the cilium agent. This request and the envoy and operator
 # requests sit just above what each pod uses on an idle node.

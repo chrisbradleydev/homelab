@@ -17,6 +17,9 @@
     directory_mode: "0700"
     mode: "0600"
 
+- name: Encrypt Secrets at rest
+  ansible.builtin.include_tasks: etcd-encryption.yaml
+
 - name: Initialize Kubernetes cluster
   become: true
   ansible.builtin.shell:
@@ -65,9 +68,25 @@
   changed_when: "'untainted' in kubernetes_taint.stdout"
   failed_when: kubernetes_taint.rc != 0 and 'not found' not in kubernetes_taint.stderr
 
+- name: Label control plane node with its failure domain
+  become: true
+  ansible.builtin.command: >-
+    kubectl label node {{ ansible_facts['hostname'] }}
+    topology.kubernetes.io/zone={{ kubernetes_zone }} --overwrite
+  environment:
+    KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+  register: kubernetes_zone_label
+  changed_when: "'not labeled' not in kubernetes_zone_label.stdout"
+
+- name: Install Gateway API CRDs
+  ansible.builtin.include_tasks: gateway-api.yaml
+
 - name: Install Cilium
   ansible.builtin.include_tasks: cilium.yaml
 
 - name: Remove kube-proxy
   ansible.builtin.include_tasks: kube-proxy.yaml
   when: kubernetes_is_first_control_plane
+
+- name: Schedule etcd backups
+  ansible.builtin.include_tasks: etcd-backup.yaml

@@ -21,6 +21,17 @@ apiServer:
   extraArgs:
     - name: authorization-mode
       value: Node,RBAC
+    # Encrypt Secrets at rest in etcd (see tasks/etcd-encryption.yaml)
+    - name: encryption-provider-config
+      value: "{{ kubernetes_encryption_config }}"
+    - name: encryption-provider-config-automatic-reload
+      value: "true"
+  extraVolumes:
+    - name: encryption-config
+      hostPath: "{{ kubernetes_encryption_config | dirname }}"
+      mountPath: "{{ kubernetes_encryption_config | dirname }}"
+      readOnly: true
+      pathType: DirectoryOrCreate
 # Cilium replaces kube-proxy, see tasks/kube-proxy.yaml
 proxy:
   disabled: true
@@ -42,15 +53,16 @@ kubeAPIBurst: 300
 kubeAPIQPS: 100
 maxPods: 110
 # Reserve headroom for the OS and for kubelet/CRI-O. The control plane is
-# deliberately schedulable (see tasks/control-plane.yaml)
+# deliberately schedulable (see tasks/control-plane.yaml). Running nodes pick
+# up changes through tasks/kubelet-reserved.yaml.
 systemReserved:
-  cpu: 200m
-  memory: 300Mi
+  cpu: "{{ kubernetes_system_reserved_cpu }}"
+  memory: "{{ kubernetes_system_reserved_memory }}"
 kubeReserved:
-  cpu: 200m
-  memory: 300Mi
+  cpu: "{{ kubernetes_kube_reserved_cpu }}"
+  memory: "{{ kubernetes_kube_reserved_memory }}"
 evictionHard:
-  memory.available: "200Mi"
-  nodefs.available: "10%"
+  memory.available: "{{ kubernetes_eviction_memory_available }}"
+  nodefs.available: "{{ kubernetes_eviction_nodefs_available }}"
 enforceNodeAllocatable:
   - pods

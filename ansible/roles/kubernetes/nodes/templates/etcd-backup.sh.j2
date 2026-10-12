@@ -1,0 +1,23 @@
+#!/bin/bash
+# Managed by Ansible (roles/kubernetes/nodes). Takes a daily etcd snapshot and
+# keeps the last {{ kubernetes_etcd_backup_keep_days }} days.
+# scripts/etcd-backup-pull.sh copies the snapshots to another machine.
+set -o errexit -o nounset -o pipefail
+umask 077
+
+backup_dir={{ kubernetes_etcd_backup_dir }}
+stamp=$(date --utc +%Y%m%dT%H%MZ)
+export KUBECONFIG={{ kubernetes_kubeconfig }}
+
+mkdir -p "$backup_dir"
+
+# /var/lib/etcd is a hostPath mount of the etcd static pod
+kubectl --namespace kube-system exec etcd-{{ ansible_facts['hostname'] }} -- \
+  etcdctl --endpoints=https://127.0.0.1:2379 \
+  --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+  --cert=/etc/kubernetes/pki/etcd/server.crt \
+  --key=/etc/kubernetes/pki/etcd/server.key \
+  snapshot save /var/lib/etcd/scheduled-snapshot.db
+mv /var/lib/etcd/scheduled-snapshot.db "$backup_dir/etcd-$stamp.db"
+
+find "$backup_dir" -maxdepth 1 -name 'etcd-*.db' -mtime +{{ kubernetes_etcd_backup_keep_days }} -delete

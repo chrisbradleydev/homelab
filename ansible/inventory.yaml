@@ -45,16 +45,19 @@ home:
       ansible_port: 22
       ansible_user: chrisbradley
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+      kubernetes_zone: pve1 # Proxmox host, see topology.kubernetes.io/zone
     kube2.localdomain:
       ansible_host: 192.168.30.12
       ansible_port: 22
       ansible_user: chrisbradley
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+      kubernetes_zone: pve2 # Proxmox host, see topology.kubernetes.io/zone
     kube3.localdomain:
       ansible_host: 192.168.30.13
       ansible_port: 22
       ansible_user: chrisbradley
       ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+      kubernetes_zone: pve1 # Proxmox host, see topology.kubernetes.io/zone
     # vlan 40
     ahab.localdomain:
       ansible_host: 192.168.40.11

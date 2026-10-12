@@ -17,6 +17,10 @@
   ansible.builtin.include_tasks: join.yaml
   when: kubernetes_is_worker
 
+- name: Apply kubelet reservations to running nodes
+  ansible.builtin.include_tasks: kubelet-reserved.yaml
+  when: kubernetes_is_first_control_plane
+
 - name: Upgrade cluster
   ansible.builtin.include_tasks: upgrade.yaml
   when: kubernetes_is_first_control_plane
