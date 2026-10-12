@@ -1,0 +1,63 @@
+{{- $name := .Release.Name }}
+# The namespace's default-deny policy blocks all other ingress. Every pod the
+# operator creates for this cluster carries the cnpg.io/cluster label: the
+# instances, the pooler and the jobs that create or copy an instance.
+# https://cloudnative-pg.io/documentation/current/security/#exposed-ports
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}-instances
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ $name }}
+      cnpg.io/podRole: instance
+  ingress:
+    # Replication, the pooler and the join job use 5432. The primary's
+    # isolation check calls the other instance on 8000. While the API server
+    # is down, a primary that still reaches a replica keeps running.
+    - fromEndpoints:
+        - matchLabels:
+            cnpg.io/cluster: {{ $name }}
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+            - port: "8000"
+              protocol: TCP
+    # The operator reads each instance's status and runs backups on 8000
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: pg-operator
+            app.kubernetes.io/name: cloudnative-pg
+      toPorts:
+        - ports:
+            - port: "8000"
+              protocol: TCP
+{{- with .Values.pooler.clients }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ $name }}-pooler
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" $ | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      cnpg.io/poolerName: {{ $name }}-pooler
+  ingress:
+    - fromEndpoints:
+        {{- range . }}
+        - matchLabels:
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+{{- end }}

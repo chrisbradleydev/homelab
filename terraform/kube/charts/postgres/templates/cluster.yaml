@@ -1,0 +1,79 @@
+{{- $name := .Release.Name }}
+# https://cloudnative-pg.io/documentation/current/cloudnative-pg.v1/#cluster
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.instances }}
+  imageName: {{ .Values.image | quote }}
+  priorityClassName: {{ .Values.priorityClassName }}
+  # Promote the replica before restarting the old primary for an update
+  primaryUpdateMethod: switchover
+
+  bootstrap:
+    initdb:
+      database: {{ .Values.database }}
+      owner: {{ .Values.owner }}
+
+  certificates:
+    serverTLSSecret: {{ $name }}-server-tls
+    # cert-manager writes the internal root to ca.crt in the same Secret
+    serverCASecret: {{ $name }}-server-tls
+
+  postgresql:
+    {{- with .Values.parameters }}
+    parameters:
+      {{- range $key, $value := . }}
+      {{ $key }}: {{ $value | quote }}
+      {{- end }}
+    {{- end }}
+    # PostgreSQL rejects connections without TLS. The instances and the
+    # pooler always use TLS.
+    pg_hba:
+      - hostnossl all all all reject
+
+  resources:
+    {{- toYaml .Values.resources | nindent 4 }}
+
+  storage:
+    storageClass: {{ .Values.storage.storageClass }}
+    size: {{ .Values.storage.size }}
+
+  affinity:
+    # Two instances never share a node
+    enablePodAntiAffinity: true
+    podAntiAffinityType: required
+    topologyKey: kubernetes.io/hostname
+    # Put the instances on different Proxmox hosts when the nodes allow it
+    additionalPodAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: topology.kubernetes.io/zone
+            labelSelector:
+              matchLabels:
+                cnpg.io/cluster: {{ $name }}
+                cnpg.io/podRole: instance
+    # Stay off the control-plane node when another node has room
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 50
+          preference:
+            matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+
+  backup:
+    volumeSnapshot:
+      className: {{ .Values.backup.snapshotClass }}
+      # A cold backup stops the replica for the few seconds the snapshot
+      # takes. Restoring a cold backup needs no WAL archive, and this cluster
+      # has none until an object store exists.
+      online: false
+      # Deleting a Backup deletes its snapshot. The pruner relies on that to
+      # remove old snapshots.
+      snapshotOwnerReference: backup

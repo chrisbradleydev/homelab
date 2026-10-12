@@ -160,8 +160,9 @@ and by Cilium, so the role steps through every minor version in between:
    repositories, runs `kubeadm upgrade apply` on the control plane, then for
    every node drains it, upgrades kubelet, kubectl and CRI-O, restarts them,
    waits for Ready, and uncordons it. Before it drains the next node, it waits
-   until no PodDisruptionBudget blocks an eviction, so a database replica that
-   moved off the previous node is Ready again first. If you change only
+   until no PodDisruptionBudget blocks an eviction and every PostgreSQL
+   cluster has all its instances Ready. A database replica that moved off the
+   previous node is then Ready again before the next drain. If you change only
    `kubernetes_cri_o_version`, the role runs one hop. It skips the kubeadm
    steps and upgrades CRI-O on every node whose CRI-O is older than the
    pinned version.

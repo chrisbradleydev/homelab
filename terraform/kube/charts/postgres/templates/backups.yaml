@@ -1,0 +1,169 @@
+{{- $name := .Release.Name }}
+# A daily cold snapshot of the replica's volume. The snapshots sit on the same
+# Ceph pool as the data, so they protect against mistakes such as a bad
+# migration, not against losing Ceph. A restore creates a new Cluster from a
+# snapshot:
+# https://cloudnative-pg.io/documentation/current/recovery/#recovery-from-volumesnapshot-objects
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ $name }}-daily
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  cluster:
+    name: {{ $name }}
+  method: volumeSnapshot
+  # The Backups have no owner, so deleting the Cluster or this release
+  # leaves them and their snapshots in place
+  backupOwnerReference: none
+---
+# CloudNativePG has no retention policy for snapshot backups, so this job
+# deletes the old ones. It reads only the Backups that carry the
+# cnpg.io/scheduled-backup label of the ScheduledBackup above, so it never
+# deletes a backup someone took by hand.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-backup-pruner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+data:
+  prune.py: |
+    import json, os, ssl, urllib.parse, urllib.request
+    from datetime import datetime, timedelta, timezone
+
+    sa = "/var/run/secrets/kubernetes.io/serviceaccount"
+    namespace = open(f"{sa}/namespace").read()
+    token = open(f"{sa}/token").read()
+    context = ssl.create_default_context(cafile=f"{sa}/ca.crt")
+    url = f"https://kubernetes.default.svc/apis/postgresql.cnpg.io/v1/namespaces/{namespace}/backups"
+
+    def call(method, path=""):
+        request = urllib.request.Request(url + path, method=method, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(request, context=context, timeout=30) as response:
+            return json.load(response)
+
+    selector = urllib.parse.quote(f"cnpg.io/scheduled-backup={os.environ['SCHEDULED_BACKUP']}")
+    backups = sorted(call("GET", f"?labelSelector={selector}")["items"], key=lambda b: b["metadata"]["creationTimestamp"])
+    completed = [b["metadata"]["name"] for b in backups if b.get("status", {}).get("phase") == "completed"]
+    cutoff = datetime.now(timezone.utc) - timedelta(days=int(os.environ["KEEP_DAYS"]))
+
+    for backup in backups:
+        name = backup["metadata"]["name"]
+        phase = backup.get("status", {}).get("phase")
+        created = datetime.fromisoformat(backup["metadata"]["creationTimestamp"])
+        # Backups still running have no final phase yet
+        if phase not in ("completed", "failed") or created >= cutoff:
+            continue
+        if completed and name == completed[-1]:
+            continue
+        call("DELETE", f"/{name}")
+        print(f"Deleted {name}: {phase}, created {created:%Y-%m-%d}")
+
+    print(f"{len(completed)} completed backups before pruning")
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-backup-pruner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-backup-pruner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - postgresql.cnpg.io
+    resources:
+      - backups
+    verbs:
+      - list
+      - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-backup-pruner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}-backup-pruner
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}-backup-pruner
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}-backup-pruner
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.pruneSchedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "postgres.labels" . | nindent 12 }}
+            app.kubernetes.io/component: backup-pruner
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ $name }}-backup-pruner
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: prune
+              image: {{ .Values.prunerImage | quote }}
+              command:
+                - python3
+                - -I
+                - /scripts/prune.py
+              env:
+                - name: SCHEDULED_BACKUP
+                  value: {{ $name }}-daily
+                - name: KEEP_DAYS
+                  value: {{ .Values.backup.keepDays | quote }}
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 64Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: {{ $name }}-backup-pruner

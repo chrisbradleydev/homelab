@@ -35,11 +35,11 @@ module "external_secrets_namespace" {
   default_deny = false
 }
 
-# The pg-operator chart can't set a seccompProfile, which restricted requires
+# Holds the CloudNativePG operator
 module "pg_operator_namespace" {
   source       = "./modules/product-namespace"
   name         = "pg-operator"
-  pod_security = "baseline"
+  pod_security = "restricted"
   default_deny = false
 }
 
@@ -52,8 +52,9 @@ module "gitea_namespace" {
   gateway           = true
   trust_internal_ca = true
   openbao_reader    = true
-  # Two PostgreSQL members with sidecars, PgBouncer, the pgBackRest repo
-  # host, Valkey, Gitea and backup Jobs need about 2.3 CPU and 8.5 GiB.
+  # Two PostgreSQL instances, two PgBouncer pods, Valkey and Gitea are sized
+  # to request about 1.7 CPU and 7.4 GiB. The job that copies data into a new
+  # PostgreSQL instance briefly requests as much as one more instance.
   quota = {
     "requests.cpu"           = "4"
     "requests.memory"        = "12Gi"

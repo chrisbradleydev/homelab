@@ -1,0 +1,59 @@
+# Images, pinned by digest. CloudNativePG builds its images on Debian or
+# distroless, and both run on the hosts' x86-64-v2 CPUs. cosign verify
+# confirmed the PostgreSQL and PgBouncer digests against the cloudnative-pg
+# GitHub workflows. The minimal image has no extensions beyond PostgreSQL's own.
+image: "ghcr.io/cloudnative-pg/postgresql:17.11-minimal-trixie@sha256:e1f13bf01149991575399038559935f839686073e0f18255a28ec68a3d283568"
+poolerImage: "ghcr.io/cloudnative-pg/pgbouncer:1.25.2-trixie@sha256:b15c428057d1ffbc19fb70496911a5f1a47066dcc1315bf794f4e85ade29e2e5"
+prunerImage: "docker.io/library/python:3.14-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170"
+
+instances: 2
+priorityClassName: data-critical
+
+# initdb creates this database and its owner. The operator writes the
+# owner's password to the Secret <release>-app.
+database: app
+owner: app
+
+storage:
+  storageClass: ceph-rbd-retain
+  size: 10Gi
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 1Gi
+  limits:
+    memory: 1Gi
+
+# postgresql.conf settings. CloudNativePG accepts only string values.
+parameters: {}
+
+pooler:
+  instances: 2
+  # Clients that keep session state, such as prepared statements, break
+  # under transaction pooling
+  poolMode: session
+  # pgbouncer.ini settings. CloudNativePG accepts only string values.
+  parameters: {}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 64Mi
+  # Label sets for the pods that may connect to the pooler. Each entry is one
+  # matchLabels map.
+  clients: []
+
+backup:
+  # CloudNativePG cron fields start with seconds. This is 01:00 every day.
+  schedule: "0 0 1 * * *"
+  # The pruner runs after the backup and deletes scheduled backups older than
+  # keepDays. It always keeps the newest completed one.
+  pruneSchedule: "30 1 * * *"
+  keepDays: 7
+  snapshotClass: ceph-rbd
+
+# Changes to any file in this chart change this value, so Terraform upgrades
+# the release. The .tf file that installs the release sets it.
+checksum: ""

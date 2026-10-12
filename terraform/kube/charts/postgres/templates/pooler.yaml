@@ -1,0 +1,42 @@
+{{- $name := .Release.Name }}
+# Clients connect to the Service <release>-pooler, which sends them only to
+# the primary. PgBouncer looks up passwords in PostgreSQL through a role the
+# operator creates.
+# https://cloudnative-pg.io/documentation/current/connection_pooling/
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: {{ $name }}-pooler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  cluster:
+    name: {{ $name }}
+  instances: {{ .Values.pooler.instances }}
+  type: rw
+  pgbouncer:
+    poolMode: {{ .Values.pooler.poolMode }}
+    parameters:
+      # Refuse clients that don't use TLS. The default is prefer.
+      client_tls_sslmode: require
+      {{- range $key, $value := .Values.pooler.parameters }}
+      {{ $key }}: {{ $value | quote }}
+      {{- end }}
+  template:
+    spec:
+      priorityClassName: {{ .Values.priorityClassName }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    cnpg.io/poolerName: {{ $name }}-pooler
+      containers:
+        - name: pgbouncer
+          image: {{ .Values.poolerImage | quote }}
+          resources:
+            {{- toYaml .Values.pooler.resources | nindent 12 }}

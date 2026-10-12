@@ -1,0 +1,31 @@
+# Values for charts/postgres. Gitea connects to gitea-pg-pooler with the
+# password from the Secret gitea-pg-app.
+database: gitea
+owner: gitea
+
+storage:
+  size: 20Gi
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    memory: 2Gi
+
+parameters:
+  shared_buffers: 512MB
+  effective_cache_size: 1536MB
+  max_connections: "100"
+  work_mem: 8MB
+
+pooler:
+  # Gitea's PostgreSQL driver breaks under transaction pooling, so the
+  # chart's session pooling stays. max_db_connections keeps the pooler's
+  # connections to PostgreSQL well under max_connections.
+  parameters:
+    default_pool_size: "25"
+    max_db_connections: "40"
+  clients:
+    - app.kubernetes.io/name: gitea
+      app.kubernetes.io/instance: gitea

@@ -155,11 +155,14 @@
       changed_when: "'already uncordoned' not in kubernetes_upgrade_node_uncordon.stdout"
 
     # If a pod that moved off this node isn't Ready again within the drain
-    # timeout, the next drain fails
+    # timeout, the next drain fails. The check skips CloudNativePG's budgets.
+    # The budget for a primary always allows zero disruptions, because the
+    # operator moves the primary to a replica before a drain evicts it.
     - name: Wait until no PodDisruptionBudget blocks the next drain
       become: true
       ansible.builtin.command: >-
         kubectl get pdb --all-namespaces
+        --selector app.kubernetes.io/managed-by!=cloudnative-pg
         --output jsonpath='{range .items[?(@.status.disruptionsAllowed==0)]}{.metadata.namespace}/{.metadata.name} {end}'
       environment:
         KUBECONFIG: "{{ kubernetes_kubeconfig }}"
@@ -168,3 +171,31 @@
       retries: "{{ kubernetes_pdb_wait_retries }}"
       delay: 10
       changed_when: false
+
+    - name: Check whether CloudNativePG is installed
+      become: true
+      ansible.builtin.command: kubectl api-resources --api-group=postgresql.cnpg.io --output name
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      register: kubernetes_cnpg_resources
+      changed_when: false
+
+    # Moving a primary needs a Ready replica. Without one, the drain of the
+    # primary's node waits until it times out.
+    - name: Wait until every PostgreSQL cluster has all its instances Ready
+      become: true
+      ansible.builtin.command: >-
+        kubectl get clusters.postgresql.cnpg.io --all-namespaces
+        --output jsonpath='{range .items[*]}{.status.readyInstances}/{.spec.instances} {end}'
+      environment:
+        KUBECONFIG: "{{ kubernetes_kubeconfig }}"
+      register: kubernetes_cnpg_ready
+      # Each cluster prints <ready>/<wanted>, for example 2/2
+      until: >-
+        kubernetes_cnpg_ready.stdout.split()
+        | reject('match', '^(\d+)/\1$')
+        | list | length == 0
+      retries: "{{ kubernetes_pdb_wait_retries }}"
+      delay: 10
+      changed_when: false
+      when: "'clusters.postgresql.cnpg.io' in kubernetes_cnpg_resources.stdout_lines"

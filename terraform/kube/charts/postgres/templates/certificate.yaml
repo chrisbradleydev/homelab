@@ -1,0 +1,38 @@
+{{- $name := .Release.Name }}
+{{- $ns := .Release.Namespace }}
+# The server certificate for PostgreSQL and the pooler, which reuses it.
+# Clients can verify the names below with sslmode=verify-full. The instances
+# verify each other only against the CA, not the names. CloudNativePG still
+# signs the client certificates for replication and for the pooler's login
+# with a CA of its own. A certificate from internal-ca therefore can't log in.
+# https://cloudnative-pg.io/documentation/current/certificates/
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $name }}-server
+  namespace: {{ $ns }}
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $name }}-server-tls
+  secretTemplate:
+    labels:
+      # The instances and the pooler reload the certificate when it renews
+      cnpg.io/reload: ""
+  dnsNames:
+    {{- range list "rw" "ro" "r" "pooler" }}
+    - {{ $name }}-{{ . }}
+    - {{ $name }}-{{ . }}.{{ $ns }}
+    - {{ $name }}-{{ . }}.{{ $ns }}.svc
+    - {{ $name }}-{{ . }}.{{ $ns }}.svc.cluster.local
+    {{- end }}
+  usages:
+    - server auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: internal-ca
