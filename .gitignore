@@ -1,3 +1,12 @@
 .DS_Store
 .ansible
 .vscode
+
+# Secrets
+*.pem
+*.key
+*kubeconfig*
+*.snap
+.vault-token
+init.json
+terraform.tfvars
