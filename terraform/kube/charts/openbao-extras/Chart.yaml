@@ -1,0 +1,5 @@
+apiVersion: v2
+name: openbao-extras
+description: The OpenBao TLS certificate, network policies and raft snapshot job
+type: application
+version: 0.1.0

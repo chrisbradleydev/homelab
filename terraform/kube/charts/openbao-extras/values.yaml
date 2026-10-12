@@ -1,0 +1,11 @@
+image: "quay.io/openbao/openbao:2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf"
+
+snapshot:
+  schedule: "30 2 * * *"
+  keepDays: 14
+  storageClass: ceph-rbd-retain
+  size: 5Gi
+
+# Changes to any file in this chart change this value, so Terraform upgrades
+# the release. Set by openbao.tf.
+checksum: ""

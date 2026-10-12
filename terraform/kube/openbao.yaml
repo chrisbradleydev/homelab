@@ -1,0 +1,118 @@
+# https://openbao.org/docs/platform/k8s/helm/configuration/
+global:
+  tlsDisable: false
+injector:
+  enabled: false
+csi:
+  enabled: false
+
+server:
+  image:
+    registry: quay.io
+    repository: openbao/openbao
+    # The Alpine image. openbao-ubi needs x86-64-v3, and the chart's start
+    # script needs a shell, which the distroless image lacks. cosign verify
+    # confirmed this digest against the openbao/openbao GitHub workflows.
+    tag: "2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf"
+  priorityClassName: platform-critical
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      memory: 384Mi
+  # With OrderedReady, an uninitialized openbao-0 holds back pods 1 and 2
+  podManagementPolicy: Parallel
+  statefulSet:
+    securityContext:
+      # Setting either map replaces the chart default, so both list every
+      # field
+      pod:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      container:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+  extraEnvironmentVars:
+    BAO_CACERT: /openbao/tls/ca.crt
+  volumes:
+    - name: tls
+      secret:
+        secretName: openbao-tls
+    - name: unseal
+      secret:
+        secretName: openbao-unseal
+        defaultMode: 0400
+  volumeMounts:
+    - name: tls
+      mountPath: /openbao/tls
+      readOnly: true
+    - name: unseal
+      mountPath: /openbao/unseal
+      readOnly: true
+  dataStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: ceph-rbd-retain
+  ha:
+    enabled: true
+    replicas: 3
+    # The default pod IP isn't in the certificate, so retry_join would fail
+    # TLS verification
+    apiAddr: "https://$(BAO_K8S_POD_NAME).openbao-internal:8200"
+    raft:
+      enabled: true
+      setNodeId: true
+      # The chart's start script runs sed over this text and replaces
+      # HOST_IP, POD_IP, HOSTNAME, API_ADDR, TRANSIT_ADDR and RAFT_ADDR.
+      # Keep those words out of the config.
+      config: |
+        ui = true
+
+        listener "tcp" {
+          address         = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_cert_file   = "/openbao/tls/tls.crt"
+          tls_key_file    = "/openbao/tls/tls.key"
+          tls_auto_reload = true
+        }
+
+        seal "static" {
+          current_key_id = "homelab-20261012"
+          current_key    = "file:///openbao/unseal/unseal.key"
+        }
+
+        storage "raft" {
+          path = "/openbao/data"
+          retry_join {
+            leader_api_addr     = "https://openbao-0.openbao-internal:8200"
+            leader_ca_cert_file = "/openbao/tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr     = "https://openbao-1.openbao-internal:8200"
+            leader_ca_cert_file = "/openbao/tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr     = "https://openbao-2.openbao-internal:8200"
+            leader_ca_cert_file = "/openbao/tls/ca.crt"
+          }
+        }
+
+        # OpenBao 2.3.2 and later refuse to create audit devices through the
+        # API, so the config declares this one
+        audit "file" "stdout" {
+          options {
+            file_path = "stdout"
+          }
+        }
+
+        service_registration "kubernetes" {}
+  gateway:
+    httpRoute:
+      enabled: false # off until the internal Gateway exists

@@ -4,3 +4,9 @@
 ephemeral "sops_file" "ceph" {
   source_file = "./secrets/ceph.enc.yaml"
 }
+
+# The 32-byte key that OpenBao's static seal uses. Losing it makes OpenBao's
+# raft data unreadable, so keep a second copy outside this repository.
+ephemeral "sops_file" "openbao" {
+  source_file = "./secrets/openbao.enc.yaml"
+}

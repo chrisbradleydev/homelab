@@ -1,0 +1,42 @@
+# The default-deny policy from charts/namespace-default-deny blocks all other
+# ingress. Terraform installs these rules before the servers, because
+# retry_join needs 8200 between the pods from the first start.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: openbao-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "openbao-extras.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: openbao
+      component: server
+  ingress:
+    # Clients: the Gateway's Envoy, External Secrets, and pods in this
+    # namespace, which include the other servers and the snapshot job
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: external-secrets
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .Release.Namespace }}
+      toPorts:
+        - ports:
+            - port: "8200"
+              protocol: TCP
+    # Raft replication and request forwarding between the servers
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: openbao
+            component: server
+      toPorts:
+        - ports:
+            - port: "8201"
+              protocol: TCP

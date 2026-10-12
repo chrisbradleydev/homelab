@@ -1,0 +1,120 @@
+# A daily raft snapshot onto a PVC. The snapshot holds OpenBao's encrypted
+# data, so restoring it needs the same static seal key. The PVC sits on the
+# same Ceph pool as OpenBao, so these snapshots protect against mistakes, not
+# against losing Ceph.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-snapshot
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "openbao-extras.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openbao-snapshots
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "openbao-extras.labels" . | nindent 4 }}
+spec:
+  storageClassName: {{ .Values.snapshot.storageClass }}
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.snapshot.size }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: openbao-snapshot
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "openbao-extras.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.snapshot.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "openbao-extras.labels" . | nindent 12 }}
+            app.kubernetes.io/component: snapshot
+        spec:
+          restartPolicy: Never
+          serviceAccountName: openbao-snapshot
+          # The snapshot role checks for audience openbao, which the default
+          # token doesn't carry. The projected token below does.
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: snapshot
+              image: {{ .Values.image | quote }}
+              env:
+                - name: BAO_ADDR
+                  value: https://openbao-active.{{ .Release.Namespace }}.svc:8200
+                - name: BAO_CACERT
+                  value: /ca/ca.crt
+                - name: HOME
+                  value: /tmp
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  BAO_TOKEN=$(bao write -field=token auth/kubernetes/login role=snapshot jwt=@/var/run/secrets/openbao/token)
+                  export BAO_TOKEN
+                  bao operator raft snapshot save "/snapshots/openbao-$(date -u +%Y%m%dT%H%MZ).snap"
+                  find /snapshots -maxdepth 1 -name 'openbao-*.snap' -mtime +{{ .Values.snapshot.keepDays }} -delete
+                  ls -l /snapshots
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: token
+                  mountPath: /var/run/secrets/openbao
+                  readOnly: true
+                - name: ca
+                  mountPath: /ca
+                  readOnly: true
+                - name: snapshots
+                  mountPath: /snapshots
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      audience: openbao
+                      expirationSeconds: 600
+                      path: token
+            - name: ca
+              configMap:
+                name: internal-ca-bundle
+            - name: snapshots
+              persistentVolumeClaim:
+                claimName: openbao-snapshots
+            - name: tmp
+              emptyDir:
+                sizeLimit: 16Mi
