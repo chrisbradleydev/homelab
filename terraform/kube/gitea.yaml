@@ -1,0 +1,251 @@
+image:
+  # The chart adds -rootless to the tag. The rootless image runs as uid 1000
+  # and serves SSH itself on 2222.
+  tag: "1.27.3"
+  digest: "sha256:1c17ecaead42eb3b5391553d8708103a4beb0e86edf5b9ebc1eb269c318845f2"
+
+# The repositories and the bleve issue index sit on a ReadWriteOnce volume,
+# so only one pod can run. Recreate stops the old pod before the new one
+# starts.
+replicaCount: 1
+strategy:
+  type: Recreate
+
+priorityClassName: data-critical
+affinity:
+  # Stay off the control-plane node when another node has room
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 50
+        preference:
+          matchExpressions:
+            - key: node-role.kubernetes.io/control-plane
+              operator: DoesNotExist
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  # Change ownership only when the volume's root has the wrong owner, instead
+  # of walking every repository on each start
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+# The chart applies this to the init containers too. It mounts an emptyDir
+# at /tmp, so the root filesystem can be read-only.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 2Gi
+  limits:
+    memory: 2Gi
+# The configure-gitea init container runs the database migrations. Without
+# these values the namespace's default limit of 256Mi would apply.
+initContainers:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# The chart creates this account without a mounted token. The default
+# ServiceAccount would mount one, and Gitea never calls the Kubernetes API.
+serviceAccount:
+  create: true
+
+persistence:
+  size: 50Gi
+  storageClass: ceph-rbd-retain
+
+# SSL_CERT_DIR adds the internal CA to the image's public CAs, which Gitea
+# needs for Valkey. The PostgreSQL connection names the CA file in NAME
+# below. The init containers mount the CA too, because they run the
+# migrations.
+extraVolumes:
+  - name: internal-ca
+    configMap:
+      name: internal-ca-bundle
+extraInitVolumeMounts:
+  - name: internal-ca
+    mountPath: /etc/gitea-ca
+    readOnly: true
+extraContainerVolumeMounts:
+  - name: internal-ca
+    mountPath: /etc/gitea-ca
+    readOnly: true
+deployment:
+  env:
+    - name: SSL_CERT_DIR
+      value: /etc/ssl/certs:/etc/gitea-ca
+
+service:
+  http:
+    # A normal ClusterIP Service instead of the chart's headless default
+    clusterIP: ""
+  ssh:
+    type: LoadBalancer
+    port: 22
+    clusterIP: ""
+    externalTrafficPolicy: Cluster
+    # Its own address, not the Gateway's. Cilium picks one node per Service
+    # to answer ARP, and two Services on one address could get two nodes.
+    annotations:
+      lbipam.cilium.io/ips: "192.168.30.241"
+
+gatewayAPI:
+  enabled: true
+  core:
+    httpRoute:
+      enabled: true
+      parentRefs:
+        - group: gateway.networking.k8s.io
+          kind: Gateway
+          name: internal
+          namespace: gateway
+          sectionName: https
+      hostnames:
+        - git.internal.touchgrass.software
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /
+          # Envoy ends requests after 15 seconds by default. That breaks
+          # large clones and pushes over HTTPS.
+          timeouts:
+            request: "0s"
+          backendRefs:
+            - name: '{{ include "gitea.service.http.name" . }}'
+              port: 3000
+
+gitea:
+  admin:
+    # gitea-extras syncs this Secret from kv/apps/gitea/admin. Gitea sets the
+    # password only when it creates the account, so a later change in
+    # OpenBao doesn't reach Gitea.
+    existingSecret: gitea-admin
+    email: gitea-admin@touchgrass.software
+    passwordMode: initialOnlyNoReset
+
+  metrics:
+    enabled: true
+
+  config:
+    server:
+      DOMAIN: git.internal.touchgrass.software
+      ROOT_URL: https://git.internal.touchgrass.software/
+      # The HTTP Service reads this value directly. The chart fills in its
+      # default only while it renders app.ini, after the Service renders.
+      HTTP_PORT: 3000
+      SSH_DOMAIN: ssh.internal.touchgrass.software
+      SSH_PORT: 22
+      SSH_LISTEN_PORT: 2222
+      LFS_START_SERVER: true
+      # Serve static files locally instead of from a CDN, and turn off
+      # Gravatar
+      OFFLINE_MODE: true
+    database:
+      DB_TYPE: postgres
+      HOST: gitea-pg-pooler.gitea.svc:5432
+      # Gitea passes everything after ? to the PostgreSQL driver
+      NAME: gitea?sslrootcert=/etc/gitea-ca/ca.crt
+      USER: gitea
+      SSL_MODE: verify-full
+      # Matches the pooler's default_pool_size. In session mode each open
+      # connection holds one PostgreSQL connection.
+      MAX_OPEN_CONNS: 25
+      MAX_IDLE_CONNS: 10
+      CONN_MAX_LIFETIME: 5m
+    # Gitea calls the adapter redis. Valkey speaks the same protocol.
+    cache:
+      ADAPTER: redis
+    session:
+      PROVIDER: redis
+      COOKIE_SECURE: true
+    queue:
+      TYPE: redis
+    global_lock:
+      SERVICE_TYPE: redis
+    # bleve keeps its index on the volume, so it works only with one pod
+    indexer:
+      ISSUE_INDEXER_TYPE: bleve
+      REPO_INDEXER_ENABLED: false
+    service:
+      DISABLE_REGISTRATION: true
+      REQUIRE_SIGNIN_VIEW: true
+    security:
+      PASSWORD_HASH_ALGO: argon2
+    cron.update_checker:
+      ENABLED: false
+
+  # The init-app-ini container writes these into app.ini on the volume
+  additionalConfigFromEnvs:
+    - name: GITEA__DATABASE__PASSWD
+      valueFrom:
+        secretKeyRef:
+          name: gitea-pg-app
+          key: password
+    - name: GITEA__CACHE__HOST
+      valueFrom:
+        secretKeyRef:
+          name: gitea-valkey-url
+          key: cache
+    - name: GITEA__SESSION__PROVIDER_CONFIG
+      valueFrom:
+        secretKeyRef:
+          name: gitea-valkey-url
+          key: session
+    - name: GITEA__QUEUE__CONN_STR
+      valueFrom:
+        secretKeyRef:
+          name: gitea-valkey-url
+          key: queue
+    - name: GITEA__GLOBAL_LOCK__SERVICE_CONN_STR
+      valueFrom:
+        secretKeyRef:
+          name: gitea-valkey-url
+          key: lock
+    - name: GITEA__METRICS__TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: gitea-metrics
+          key: token
+
+  # /api/healthz checks the database and the cache, so the route sends no
+  # traffic while either is down. The startup probe gives Gitea up to five
+  # minutes to start. The migrations run before it, in an init container.
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 0
+    periodSeconds: 10
+    failureThreshold: 30
+  livenessProbe:
+    initialDelaySeconds: 0
+  readinessProbe:
+    tcpSocket: null
+    httpGet:
+      path: /api/healthz
+      port: http
+
+# Turn off the chart's own PostgreSQL and Valkey. The gitea-pg and
+# gitea-valkey releases replace them.
+postgresql:
+  enabled: false
+postgresql-ha:
+  enabled: false
+valkey:
+  enabled: false
+valkey-cluster:
+  enabled: false
+
+test:
+  enabled: false

@@ -1,0 +1,114 @@
+# Gitea's secrets. terraform/openbao generates every value under
+# kv/apps/gitea/. Gitea reads them when the pod starts, so restart Gitea
+# after a rotation. The admin password is the exception. Change it in Gitea
+# too. External Secrets reads OpenBao again every hour. If OpenBao is down,
+# each Secret keeps its last synced value.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: gitea-admin
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-extras.labels" . | nindent 4 }}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: openbao
+  target:
+    name: gitea-admin
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: username
+      remoteRef:
+        key: apps/gitea/admin
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: apps/gitea/admin
+        property: password
+---
+# One connection URL per Gitea subsystem, each on its own Valkey database
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: gitea-valkey-url
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-extras.labels" . | nindent 4 }}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: openbao
+  target:
+    name: gitea-valkey-url
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      engineVersion: v2
+      data:
+        {{- range $key, $db := dict "cache" 0 "session" 1 "queue" 2 "lock" 3 }}
+        {{ $key }}: {{ printf "rediss://gitea:{{ .gitea }}@gitea-valkey.%s.svc.cluster.local:6379/%d" $.Release.Namespace $db | quote }}
+        {{- end }}
+  data:
+    - secretKey: gitea
+      remoteRef:
+        key: apps/gitea/valkey
+        property: gitea
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: gitea-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-extras.labels" . | nindent 4 }}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: openbao
+  target:
+    name: gitea-metrics
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: token
+      remoteRef:
+        key: apps/gitea/metrics
+        property: token
+---
+# The namespace's default-deny policy blocks all other ingress
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gitea
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-extras.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- toYaml .Values.giteaPodLabels | nindent 6 }}
+  ingress:
+    # HTTP from the Gateway's Envoy
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    # SSH through the LoadBalancer Service. A client reaches a pod on the
+    # announcing node with its own address, which Cilium labels world. A pod
+    # on another node sees that node's address after SNAT, labelled
+    # remote-node. The cluster entity would also let every pod reach SSH.
+    - fromEntities:
+        - world
+        - remote-node
+        - host
+      toPorts:
+        - ports:
+            - port: "2222"
+              protocol: TCP

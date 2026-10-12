@@ -1,5 +1,5 @@
 # The gitea namespace's SecretStore, the ExternalSecrets, the Valkey
-# certificate and the Valkey network policy
+# certificate and the network policies for Gitea and Valkey
 resource "helm_release" "gitea-extras" {
   name      = "gitea-extras"
   chart     = "./charts/gitea-extras"
