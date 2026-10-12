@@ -10,7 +10,7 @@ tag=$7
 
 agent=1
 autostart=1
-balloon=1024
+balloon=0
 bios=ovmf
 boot="order=ide2;scsi0;net0"
 bootdisk=scsi0
