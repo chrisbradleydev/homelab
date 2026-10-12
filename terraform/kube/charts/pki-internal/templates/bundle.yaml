@@ -1,0 +1,22 @@
+# trust-manager writes the internal root certificate to a ConfigMap named
+# internal-ca-bundle, key ca.crt, in every namespace with the label below.
+# The bundle holds no public CAs. Workloads that also need those keep using
+# their image's system store.
+# https://cert-manager.io/docs/trust/trust-manager/
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: internal-ca-bundle
+  labels:
+    {{- include "pki-internal.labels" . | nindent 4 }}
+spec:
+  sources:
+    - secret:
+        name: touchgrass-internal-root
+        key: tls.crt
+  target:
+    configMap:
+      key: ca.crt
+    namespaceSelector:
+      matchLabels:
+        trust.touchgrass.software/internal-ca: "true"

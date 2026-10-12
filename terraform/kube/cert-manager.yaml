@@ -1,0 +1,61 @@
+# https://cert-manager.io/docs/installation/best-practice/
+crds:
+  enabled: true
+  # helm uninstall would otherwise delete every Certificate and Issuer
+  keep: true
+global:
+  priorityClassName: platform-critical
+
+# One controller holds the leader lease. The second takes over during a drain.
+replicaCount: 2
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+resources:
+  requests:
+    cpu: 20m
+    memory: 128Mi
+  limits:
+    memory: 128Mi
+
+# The DNS-01 self-check asks Cloudflare over HTTPS, not the cluster's
+# resolver. The local resolver answers internal.touchgrass.software from its
+# own zone, which has no _acme-challenge records, and the nodes can't reach
+# public resolvers on port 53.
+dns01RecursiveNameservers: "https://1.1.1.1/dns-query,https://1.0.0.1/dns-query"
+dns01RecursiveNameserversOnly: true
+
+prometheus:
+  enabled: true
+  servicemonitor:
+    enabled: false # no Prometheus Operator yet
+
+webhook:
+  replicaCount: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      memory: 64Mi
+
+cainjector:
+  replicaCount: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  resources:
+    requests:
+      cpu: 10m
+      memory: 128Mi
+    limits:
+      memory: 128Mi
+  # Watch Certificates and Secrets only in the cert-manager namespace. Don't
+  # add --enable-certificates-data-source=false. The Porkbun webhook's
+  # APIService gets its CA bundle through the cert-manager.io/inject-ca-from
+  # annotation, which needs that data source.
+  extraArgs:
+    - --namespace=cert-manager

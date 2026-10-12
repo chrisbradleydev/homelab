@@ -1,0 +1,5 @@
+apiVersion: v2
+name: pki-internal
+description: The internal root CA, the internal-ca ClusterIssuer and the CA bundle that trust-manager copies into namespaces
+type: application
+version: 0.1.0
