@@ -1,0 +1,97 @@
+fullnameOverride: gitea-valkey
+
+image:
+  # The Debian trixie image
+  tag: "9.1.2@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd"
+
+priorityClassName: data-critical
+
+# The volume is ReadWriteOnce, and two servers must never write one
+# append-only file. Recreate stops the old pod before the new one starts.
+deploymentStrategy: Recreate
+
+dataStorage:
+  enabled: true
+  requestedSize: 5Gi
+  className: ceph-rbd-retain
+  keepPvc: true
+
+# The chart appends this to the valkey.conf it generates.
+# - maxmemory leaves room under the 1280Mi limit for the copy-on-write pages
+#   of the fork that rewrites the append-only file.
+# - volatile-lru evicts only keys with a TTL, such as cache entries and
+#   sessions. Queue entries have none, so Valkey never evicts them.
+# - tls-auto-reload-interval makes the server check its certificate files
+#   every hour and reload them if they changed. A certificate that
+#   cert-manager renews then takes effect without a restart.
+valkeyConfig: |
+  appendonly yes
+  appendfsync everysec
+  maxmemory 768mb
+  maxmemory-policy volatile-lru
+  tls-auto-reload-interval 3600
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 1280Mi
+  limits:
+    memory: 1280Mi
+
+initResources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 64Mi
+
+# The probes run valkey-cli ping without a password. The NOAUTH reply still
+# exits 0, so a probe fails only when the server doesn't answer.
+readinessProbe:
+  enabled: true
+
+auth:
+  enabled: true
+  # gitea-extras syncs this Secret from OpenBao, one key per user
+  usersExistingSecret: gitea-valkey-users
+  aclUsers:
+    # Only the metrics exporter logs in as default. The user can run only
+    # the commands the exporter sends, and it can't read keys.
+    default:
+      permissions: "-@all +ping +info +config|get +client|list +client|setname +slowlog|get +slowlog|len +latency|latest +latency|histogram +command|info +commandlog|len"
+    # Gitea needs every data command but no admin command
+    gitea:
+      permissions: "~* &* +@all -@admin"
+
+tls:
+  enabled: true
+  existingSecret: gitea-valkey-tls
+  serverPublicKey: tls.crt
+  serverKey: tls.key
+  caPublicKey: ca.crt
+
+metrics:
+  enabled: true
+  exporter:
+    image:
+      tag: "v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820"
+    args:
+      - --redis.addr=rediss://localhost:6379
+      - --tls-ca-cert-file=/tls/ca.crt
+    extraVolumeMounts:
+      - name: gitea-valkey-tls
+        mountPath: /tls
+        readOnly: true
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop:
+          - ALL

@@ -1,0 +1,12 @@
+# openbao-active routes only to the active server. The openbao Service
+# publishes not-ready addresses, so it can route to a sealed pod.
+openbaoServer: https://openbao-active.openbao.svc:8200
+
+# Labels on the Gitea release's pods. Only those pods may connect to Valkey.
+giteaPodLabels:
+  app.kubernetes.io/name: gitea
+  app.kubernetes.io/instance: gitea
+
+# Changes to any file in this chart change this value, so Terraform upgrades
+# the release. gitea-extras.tf sets it.
+checksum: ""

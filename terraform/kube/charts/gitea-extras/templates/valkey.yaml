@@ -1,0 +1,86 @@
+# Valkey's user passwords. terraform/openbao generates both values in
+# kv/apps/gitea/valkey. The Valkey chart reads one key per user name.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: gitea-valkey-users
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-extras.labels" . | nindent 4 }}
+spec:
+  # External Secrets reads OpenBao again every hour. If OpenBao is down, the
+  # Secret keeps its last synced value. Valkey's init container writes the
+  # passwords into the ACL file when the pod starts, so restart the pod after
+  # a rotation.
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: openbao
+  target:
+    name: gitea-valkey-users
+    # Deleting this ExternalSecret deletes the Secret
+    creationPolicy: Owner
+    # Deleting the key in OpenBao leaves the Secret in place
+    deletionPolicy: Retain
+  data:
+    - secretKey: default
+      remoteRef:
+        key: apps/gitea/valkey
+        property: default
+    - secretKey: gitea
+      remoteRef:
+        key: apps/gitea/valkey
+        property: gitea
+---
+# Valkey serves only TLS. Gitea connects to gitea-valkey.gitea.svc, the
+# probes connect to 127.0.0.1, and the metrics exporter connects to
+# localhost.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gitea-valkey
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-extras.labels" . | nindent 4 }}
+spec:
+  secretName: gitea-valkey-tls
+  dnsNames:
+    - gitea-valkey
+    - gitea-valkey.{{ .Release.Namespace }}
+    - gitea-valkey.{{ .Release.Namespace }}.svc
+    - gitea-valkey.{{ .Release.Namespace }}.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  usages:
+    - server auth
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: internal-ca
+---
+# The namespace's default-deny policy blocks all other ingress
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: gitea-valkey
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gitea-extras.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: valkey
+      app.kubernetes.io/instance: gitea-valkey
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            {{- toYaml .Values.giteaPodLabels | nindent 12 }}
+      toPorts:
+        - ports:
+            - port: "6379"
+              protocol: TCP

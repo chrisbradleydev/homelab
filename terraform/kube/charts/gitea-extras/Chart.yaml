@@ -1,0 +1,5 @@
+apiVersion: v2
+name: gitea-extras
+description: The gitea namespace's SecretStore, ExternalSecrets, Valkey certificate and network policies
+type: application
+version: 0.1.0
