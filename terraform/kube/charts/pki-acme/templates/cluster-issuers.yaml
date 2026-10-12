@@ -1,0 +1,38 @@
+# Each issuer solves only for names under internal.touchgrass.software. A
+# Certificate for any other name finds no solver and fails.
+# The challenge TXT record uses a 600-second TTL, the lowest Porkbun allows.
+# https://cert-manager.io/docs/configuration/acme/dns01/webhook/
+{{- range $name, $server := .Values.issuers }}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "pki-acme.labels" $ | nindent 4 }}
+spec:
+  acme:
+    server: {{ $server }}
+    # The ACME account key. cert-manager creates it in the cert-manager
+    # namespace on first use. The CAA records on internal.touchgrass.software
+    # name this account, so a new key can't get certificates until those
+    # records name the new account.
+    privateKeySecretRef:
+      name: {{ $name }}-account-key
+    solvers:
+      - selector:
+          dnsZones:
+            - internal.touchgrass.software
+        dns01:
+          webhook:
+            groupName: acme.touchgrass.software
+            solverName: porkbun
+            config:
+              apiKey:
+                name: porkbun-api-credentials
+                key: api-key
+              secretApiKey:
+                name: porkbun-api-credentials
+                key: secret-key
+              ttl: 600
+{{- end }}

@@ -1,0 +1,7 @@
+issuers:
+  letsencrypt-staging: https://acme-staging-v02.api.letsencrypt.org/directory
+  letsencrypt-prod: https://acme-v02.api.letsencrypt.org/directory
+
+# Changes to any file in this chart change this value, so Terraform upgrades
+# the release. Set by cert-manager.tf.
+checksum: ""

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: pki-acme
+description: The Let's Encrypt staging and production ClusterIssuers, solved by DNS-01 through Porkbun
+type: application
+version: 0.1.0

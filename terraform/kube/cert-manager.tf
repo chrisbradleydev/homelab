@@ -82,3 +82,20 @@ resource "helm_release" "pki-internal" {
   ]
   depends_on = [helm_release.cert-manager, helm_release.trust-manager]
 }
+
+# The Let's Encrypt ClusterIssuers. They solve DNS-01 through the Porkbun
+# webhook, with the API key in porkbun-api-credentials.
+resource "helm_release" "pki-acme" {
+  name      = "pki-acme"
+  chart     = "./charts/pki-acme"
+  namespace = module.cert_manager_namespace.name
+  set = [
+    {
+      # helm_release doesn't notice template edits in a local chart unless a
+      # value changes, so pass a hash of every file in the chart.
+      name  = "checksum"
+      value = sha1(join("", [for f in sort(fileset("${path.module}/charts/pki-acme", "**")) : filesha1("${path.module}/charts/pki-acme/${f}")]))
+    },
+  ]
+  depends_on = [helm_release.cert-manager-webhook-porkbun, helm_release.platform-secrets]
+}

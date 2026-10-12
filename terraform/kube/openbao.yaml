@@ -113,6 +113,27 @@ server:
         }
 
         service_registration "kubernetes" {}
+  # The Gateway ends the client's TLS connection and opens a new one to
+  # openbao-active. Envoy therefore sees OpenBao tokens in plain text, inside
+  # the cluster. A TLSRoute passthrough would avoid that, but the servers
+  # would then need a certificate for bao.internal.touchgrass.software.
   gateway:
     httpRoute:
-      enabled: false # off until the internal Gateway exists
+      enabled: true
+      hosts:
+        - bao.internal.touchgrass.software
+      parentRefs:
+        - group: gateway.networking.k8s.io
+          kind: Gateway
+          name: internal
+          namespace: gateway
+          sectionName: https
+    # Envoy verifies the server certificate against the internal CA
+    tlsPolicy:
+      enabled: true
+      validation:
+        caCertificateRefs:
+          - group: ""
+            kind: ConfigMap
+            name: internal-ca-bundle
+        hostname: openbao-active.openbao.svc

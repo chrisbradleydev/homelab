@@ -1,0 +1,22 @@
+# One wildcard certificate covers every service behind the Gateway. Public
+# Certificate Transparency logs list it as *.internal.touchgrass.software, so
+# service names never appear there.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: internal-wildcard
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gateway.labels" . | nindent 4 }}
+spec:
+  secretName: internal-wildcard-tls
+  dnsNames:
+    - "*.internal.touchgrass.software"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: {{ .Values.issuer }}

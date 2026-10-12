@@ -1,0 +1,43 @@
+# Cilium runs the Gateway's Envoy inside the cilium-envoy DaemonSet and
+# creates the LoadBalancer Service cilium-gateway-internal for it. Give every
+# other LoadBalancer Service its own address. Cilium picks one node per
+# Service to answer ARP for its address. Two Services that share an address
+# can get two different nodes, and the router's ARP entry then flips between
+# them.
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: internal
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "gateway.labels" . | nindent 4 }}
+spec:
+  gatewayClassName: cilium
+  infrastructure:
+    annotations:
+      lbipam.cilium.io/ips: {{ .Values.address | quote }}
+  listeners:
+    # Accepts routes only from this namespace, which holds the redirect
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: "*.internal.touchgrass.software"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: internal-wildcard-tls
+      # Only namespaces that the product-namespace module labels with
+      # gateway = true can attach routes
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              gateway.touchgrass.software/internal: "true"

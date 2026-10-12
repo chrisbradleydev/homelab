@@ -1,0 +1,5 @@
+apiVersion: v2
+name: gateway
+description: The internal Gateway, its wildcard certificate and the HTTP-to-HTTPS redirect
+type: application
+version: 0.1.0

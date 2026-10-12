@@ -1,0 +1,12 @@
+# Before you change the certificate or the issuers, test against
+# letsencrypt-staging. Its rate limits are much higher, but browsers don't
+# trust its certificates.
+issuer: letsencrypt-prod
+
+# The Gateway's LoadBalancer address, from the lan pool in charts/cluster-base.
+# The *.internal.touchgrass.software DNS wildcard points to it.
+address: 192.168.30.240
+
+# Changes to any file in this chart change this value, so Terraform upgrades
+# the release. Set by gateway.tf.
+checksum: ""
