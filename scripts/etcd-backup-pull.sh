@@ -23,7 +23,12 @@ encrypt() {
 
 mkdir -p "$dest/etcd" "$dest/etcd-encryption-key"
 
-latest=$(ssh "$host" 'sudo ls -1t /var/backups/etcd/etcd-*.db | head -n 1')
+# Only root can read /var/backups/etcd, so the glob runs in a root shell
+latest=$(ssh "$host" "sudo sh -c 'ls -1t /var/backups/etcd/etcd-*.db | head -n 1'")
+if [ -z "$latest" ]; then
+  echo "No etcd snapshot found on $host" >&2
+  exit 1
+fi
 ssh "$host" "sudo cat '$latest'" | encrypt "$dest/etcd/$(basename "$latest").gpg"
 ssh "$host" 'sudo cat /etc/kubernetes/enc/encryption-config.yaml' |
   encrypt "$dest/etcd-encryption-key/encryption-config-$(date --utc +%Y%m%d).yaml.gpg"
