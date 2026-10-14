@@ -15,8 +15,16 @@ home:
       debian_protonvpn_lan_routes:
         - to: 192.168.10.0/24
           via: 192.168.1.1
+        - to: 192.168.20.0/24
+          via: 192.168.1.1
+        - to: 192.168.30.0/24
+          via: 192.168.1.1
         - to: 192.168.40.11/32
           via: 192.168.1.1
+      debian_protonvpn_lan_dns: 192.168.1.1
+      debian_protonvpn_lan_dns_domains:
+        - localdomain
+        - internal.touchgrass.software
     # vlan 20
     unifi.localdomain:
       ansible_host: 192.168.10.10

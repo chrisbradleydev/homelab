@@ -184,6 +184,19 @@
       ansible.builtin.command: netplan generate
       changed_when: false
 
+    # netplan apply restarts NetworkManager. The restart drops Proton's in-memory
+    # connections but leaves the proton0 and pvpnksintrf0 interfaces behind. protonvpn
+    # connect then times out until someone deletes both interfaces. This task stops the
+    # unit so Proton disconnects cleanly, and the "Connect Proton VPN" task starts it
+    # again. systemctl exits with 5 when the unit doesn't exist yet, as on a host's
+    # first run.
+    - name: Disconnect Proton VPN before netplan apply
+      ansible.builtin.command: systemctl --user stop protonvpn.service
+      environment: "{{ protonvpn_user_env }}"
+      register: protonvpn_stop
+      changed_when: protonvpn_stop.rc == 0
+      failed_when: protonvpn_stop.rc not in [0, 5]
+
     # The SSH session can drop while the LAN moves.
     - name: Apply netplan in the background
       become: true
@@ -227,6 +240,48 @@
     fail_msg: >-
       {{ protonvpn_lan }} did not come back as expected. From the Proxmox console, copy
       /etc/netplan/50-cloud-init.yaml.bak to /etc/netplan/50-cloud-init.yaml and run netplan apply.
+
+# Proton's DNS priority of -1500 makes NetworkManager drop the LAN DNS server, so
+# local names stop resolving. NetworkManager doesn't manage resolved's global settings,
+# so the server in this drop-in stays. resolved sends each query to the server with
+# the longest matching domain. A localdomain name matches both ~localdomain and
+# Proton's ~., and the longer match decides. Every other name matches only ~. and
+# goes to Proton's resolver.
+- name: Ensure resolved drop-in directory exists
+  become: true
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d
+    state: directory
+    mode: "0755"
+  when: debian_protonvpn_lan_dns_domains | length > 0
+
+- name: Write LAN DNS drop-in
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/resolved.conf.d/lan-dns.conf
+    content: |
+      [Resolve]
+      DNS={{ debian_protonvpn_lan_dns }}
+      Domains={{ debian_protonvpn_lan_dns_domains | map('regex_replace', '^', '~') | join(' ') }}
+    mode: "0644"
+  when: debian_protonvpn_lan_dns_domains | length > 0
+  register: protonvpn_lan_dns_conf
+
+- name: Remove LAN DNS drop-in
+  become: true
+  ansible.builtin.file:
+    path: /etc/systemd/resolved.conf.d/lan-dns.conf
+    state: absent
+  when: debian_protonvpn_lan_dns_domains | length == 0
+  register: protonvpn_lan_dns_removed
+
+# resolved has no reload. NetworkManager sends its link settings again after the restart.
+- name: Restart resolved
+  become: true
+  ansible.builtin.systemd_service:
+    name: systemd-resolved
+    state: restarted
+  when: protonvpn_lan_dns_conf is changed or protonvpn_lan_dns_removed is changed
 
 # gnome-keyring, unlocked at boot with no display
 
@@ -459,6 +514,14 @@
       register: protonvpn_lan_dns
       changed_when: false
 
+    # resolvectl ends each answer line with the link that the answer came in on. Every
+    # line must end with proton0. A line that ends with the LAN interface means a public
+    # name leaked to the LAN DNS server.
+    - name: Look up a public name
+      ansible.builtin.command: resolvectl query --cache=no icanhazip.com
+      register: protonvpn_public_lookup
+      changed_when: false
+
     - name: Assert no leaks
       ansible.builtin.assert:
         that:
@@ -469,6 +532,11 @@
           - protonvpn_dns.results[1].stdout is search('~\.')
           - protonvpn_dns.results[2].stdout is search('yes$')
           - protonvpn_lan_dns.stdout is search('no$')
+          - >-
+            protonvpn_public_lookup.stdout is search('-- link: proton0$', multiline=True)
+          - >-
+            protonvpn_public_lookup.stdout.split('\n\n')[0].splitlines()
+            | reject('search', '-- link: proton0$') | list | length == 0
         fail_msg: Proton VPN is leaking. Run protonvpn disconnect, check protonvpn config list and connect again.
 
     - name: Enable Proton VPN at boot

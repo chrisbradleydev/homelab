@@ -39,6 +39,13 @@ If the account has a second factor, pass a fresh token on the run that signs in:
 ansible-playbook playbooks/debian-defaults.yaml --tags protonvpn -e debian_protonvpn_totp=123456
 ```
 
+The tunnel carries all traffic and all DNS lookups. These host variables keep local traffic on the LAN:
+
+- `debian_protonvpn_lan_routes` lists the subnets the host reaches through the LAN gateway. Anything not listed goes into the tunnel, including replies to hosts on other VLANs.
+- `debian_protonvpn_lan_dns` and `debian_protonvpn_lan_dns_domains` send lookups for the listed domains to the LAN DNS server. The role writes them to `/etc/systemd/resolved.conf.d/lan-dns.conf`. Proton's resolver still answers every other name.
+
+A local name that resolves still needs its address in `debian_protonvpn_lan_routes`, or the connection goes into the tunnel.
+
 Before relying on the kill switch, check these from the console:
 
 ```sh
