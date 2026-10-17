@@ -1,6 +1,6 @@
 # External Secrets copies secrets from OpenBao into Kubernetes Secrets. It
 # talks to OpenBao through the stable vault provider, because the openbao
-# provider is still alpha. The External Secrets project tests v2.12 on
+# provider is still alpha. The External Secrets project tests v2.13 on
 # Kubernetes up to 1.36, and the cluster runs 1.37. Upgrade when a release
 # tested on 1.37 ships.
 resource "helm_release" "external-secrets" {
@@ -8,7 +8,7 @@ resource "helm_release" "external-secrets" {
   repository = "https://charts.external-secrets.io"
   chart      = "external-secrets"
   namespace  = module.external_secrets_namespace.name
-  version    = "2.12.0"
+  version    = "2.13.0"
   values = [
     yamlencode({
       installCRDs = true

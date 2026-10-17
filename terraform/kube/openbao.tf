@@ -50,7 +50,7 @@ resource "helm_release" "openbao" {
   repository = "https://openbao.github.io/openbao-helm"
   chart      = "openbao"
   namespace  = module.openbao_namespace.name
-  version    = "0.30.3"
+  version    = "0.30.4"
   values     = [file("openbao.yaml")]
   wait       = false
   depends_on = [helm_release.openbao-extras, kubernetes_secret_v1.openbao-unseal]

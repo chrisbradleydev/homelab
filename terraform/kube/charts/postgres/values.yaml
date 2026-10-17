@@ -3,7 +3,7 @@
 # confirmed the PostgreSQL and PgBouncer digests against the cloudnative-pg
 # GitHub workflows. The minimal image has no extensions beyond PostgreSQL's own.
 image: "ghcr.io/cloudnative-pg/postgresql:17.11-minimal-trixie@sha256:e1f13bf01149991575399038559935f839686073e0f18255a28ec68a3d283568"
-poolerImage: "ghcr.io/cloudnative-pg/pgbouncer:1.25.2-trixie@sha256:b15c428057d1ffbc19fb70496911a5f1a47066dcc1315bf794f4e85ade29e2e5"
+poolerImage: "ghcr.io/cloudnative-pg/pgbouncer:1.26.0-trixie@sha256:ce54f1133c509f1db8a8092c3f1c761d8c9292065ed6b6698786bb966da4dab9"
 prunerImage: "docker.io/library/python:3.14-slim-trixie@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170"
 
 instances: 2

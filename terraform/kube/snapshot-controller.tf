@@ -6,7 +6,7 @@ resource "helm_release" "snapshot-controller" {
   repository = "https://piraeus.io/helm-charts/"
   chart      = "snapshot-controller"
   namespace  = "kube-system"
-  version    = "5.3.0"
+  version    = "5.4.0"
   values = [
     yamlencode({
       # helm uninstall leaves the CRDs and the snapshots in them.

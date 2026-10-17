@@ -3,12 +3,15 @@
 # to them one minor version at a time: Cilium first, then Kubernetes.
 kubernetes_version: "1.37.1" # kubeadm, kubelet and kubectl
 kubernetes_cri_o_version: "1.37.2"
-kubernetes_cilium_version: "1.20.2"
+kubernetes_cilium_version: "1.20.3"
+# The Helm apt repository lags the GitHub releases. Before a bump, check that
+# the version is listed at
+# https://packages.buildkite.com/helm-linux/helm-debian/any/dists/any/main/binary-amd64/Packages
 kubernetes_helm_version: "4.3.0"
 # Gateway API CRDs that Cilium serves. Change this together with
 # kubernetes_cilium_version, to the version listed here:
 # https://docs.cilium.io/en/v1.20/network/servicemesh/gateway-api/gateway-api/
-kubernetes_gateway_api_version: "1.6.1"
+kubernetes_gateway_api_version: "1.6.3"
 
 # Cluster networking
 kubernetes_api_port: 6443

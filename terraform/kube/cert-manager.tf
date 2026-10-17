@@ -12,7 +12,7 @@ resource "helm_release" "cert-manager" {
 
 # cert-manager has no built-in Porkbun solver. This community webhook is the
 # only one still maintained. The image digest below passed this check:
-#   cosign verify ghcr.io/octabits-io/cert-manager-webhook-porkbun:2.0.7 \
+#   cosign verify ghcr.io/octabits-io/cert-manager-webhook-porkbun:2.0.8 \
 #     --certificate-identity-regexp '^https://github.com/octabits-io/cert-manager-webhook-porkbun/' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 # The webhook reads the Porkbun API key from the porkbun-api-credentials
@@ -22,13 +22,13 @@ resource "helm_release" "cert-manager-webhook-porkbun" {
   repository = "oci://ghcr.io/octabits-io/charts"
   chart      = "cert-manager-webhook-porkbun"
   namespace  = module.cert_manager_namespace.name
-  version    = "2.0.7"
+  version    = "2.0.8"
   values = [
     yamlencode({
       # ClusterIssuers name this group in their dns01.webhook solver
       groupName = "acme.touchgrass.software"
       image = {
-        digest = "sha256:ab5e9a28a30ab780e21ffd21b7f163f7819308f3573d03d884fe9d946ec848a3"
+        digest = "sha256:c0c3231e459b08d5fa87e66830594295a55214ffa63303ff40536e0894b4ac36"
       }
       rbac = {
         secretAccess = {

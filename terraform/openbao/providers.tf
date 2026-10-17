@@ -3,7 +3,7 @@ terraform {
     # No OpenBao provider exists. OpenBao forked Vault 1.14 and keeps its API.
     vault = {
       source  = "hashicorp/vault"
-      version = "5.12.0"
+      version = "5.13.0"
     }
     # 3.7.0 added ephemeral "random_password", which never writes the value
     # to the state
