@@ -6,6 +6,7 @@
       - fzf
       - git
       - iperf3
+      - knot-dnsutils
       - make
       - netcat-openbsd
       - ripgrep
